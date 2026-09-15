@@ -1,0 +1,991 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Hardware Check-In/Out</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --c-violet:#6d28d9; --c-violet-soft:#f1eafe; --c-pink:#ec4899; --c-pink-soft:#fdeef7;
+    --bg:#f7f6fb; --panel:#ffffff; --ink:#1c1b29; --sub:#68657a;
+    --border:#e7e3f0; --hover-bg:#faf9fd; --note-bg:#fbf8ff; --footer-muted:#b4afc4;
+    --cond-good:#16a34a; --cond-good-bg:#e6f7ec;
+    --cond-fair:#d97706; --cond-fair-bg:#fdf3e0;
+    --cond-damaged:#dc2626; --cond-damaged-bg:#fdeaea;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:'DM Sans',-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);}
+  header{background:var(--panel);border-bottom:1px solid var(--border);padding:18px 24px;display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:14px;position:sticky;top:0;z-index:40;box-shadow:0 2px 10px rgba(0,0,0,.05);}
+  .eyebrow{font-size:11px;font-weight:700;letter-spacing:.09em;color:var(--c-violet);text-transform:uppercase;margin-bottom:4px;}
+  header h1{font-size:20px;margin:0;font-weight:500;color:var(--ink);}
+  .sync-status{font-size:11.5px;color:var(--sub);margin-top:4px;min-height:14px;}
+  .link-btn{border:none;background:none;padding:0;font:inherit;color:var(--c-violet);cursor:pointer;text-decoration:underline;}
+  .link-btn:hover{color:var(--ink);}
+  main{padding:20px 24px 40px;max-width:760px;margin:0 auto;}
+  input[type=text],textarea,select{padding:8px 10px;border:1px solid var(--border);border-radius:7px;font-size:13px;font-family:inherit;background:var(--panel);color:var(--ink);width:100%;}
+  textarea{resize:vertical;min-height:56px;}
+  label{display:block;font-size:12px;color:var(--sub);margin:12px 0 4px;font-weight:600;}
+  button{padding:9px 14px;border:1px solid var(--border);border-radius:7px;background:var(--panel);font-size:13px;cursor:pointer;color:var(--ink);font-family:inherit;}
+  button.primary{background:var(--c-violet);color:#fff;border-color:var(--c-violet);}
+  button.primary:disabled{opacity:.45;cursor:not-allowed;}
+  button:hover:not(:disabled){filter:brightness(0.97);}
+
+  .tabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border);}
+  .tab-btn{border:none;border-bottom:2px solid transparent;border-radius:0;background:none;padding:10px 4px;margin-right:18px;font-size:14px;font-weight:600;color:var(--sub);}
+  .tab-btn.active{color:var(--c-violet);border-bottom-color:var(--c-violet);}
+  .panel{display:none;}
+  .panel.active{display:block;}
+
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-bottom:14px;}
+  .card h3{margin:0 0 2px;font-size:13px;text-transform:uppercase;letter-spacing:.03em;color:var(--sub);font-weight:600;}
+  .row2{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+  .device-list{border:1px solid var(--border);border-radius:8px;max-height:220px;overflow-y:auto;margin-top:8px;}
+  .device-item{padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px;}
+  .device-item:last-child{border-bottom:none;}
+  .device-item:hover{background:var(--hover-bg);}
+  .device-item.selected{background:var(--c-violet-soft);}
+  .device-item .tag{font-weight:600;}
+  .device-item .meta{color:var(--sub);font-size:12px;}
+  .device-item .check{flex-shrink:0;font-size:12px;font-weight:700;color:var(--c-violet);visibility:hidden;}
+  .device-item.selected .check{visibility:visible;}
+  .empty-hint{padding:14px;color:var(--sub);font-size:12.5px;text-align:center;}
+
+  .selected-header{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;}
+  .selected-header .count{font-size:12px;color:var(--sub);font-weight:600;}
+  .selected-list{margin-top:6px;display:flex;flex-direction:column;gap:6px;}
+  .selected-row{display:flex;justify-content:space-between;align-items:center;background:var(--c-violet-soft);border-radius:8px;padding:8px 10px;}
+  .selected-row .name{font-weight:600;font-size:13px;}
+  .selected-row .meta{color:var(--sub);font-size:11.5px;}
+  .selected-row .remove-btn{border:none;background:none;color:var(--c-violet);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;}
+  .selected-row .remove-btn:hover{color:var(--cond-damaged);}
+
+  .cond-choices{display:flex;gap:8px;margin-top:6px;}
+  .cond-choice{flex:1;text-align:center;padding:9px 4px;border-radius:7px;border:1px solid var(--border);cursor:pointer;font-size:12.5px;font-weight:600;color:var(--sub);}
+  .cond-choice.sel-good.selected{background:var(--cond-good-bg);color:var(--cond-good);border-color:var(--cond-good);}
+  .cond-choice.sel-fair.selected{background:var(--cond-fair-bg);color:var(--cond-fair);border-color:var(--cond-fair);}
+  .cond-choice.sel-damaged.selected{background:var(--cond-damaged-bg);color:var(--cond-damaged);border-color:var(--cond-damaged);}
+
+  .pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;}
+  .pill.good{background:var(--cond-good-bg);color:var(--cond-good);}
+  .pill.fair{background:var(--cond-fair-bg);color:var(--cond-fair);}
+  .pill.damaged{background:var(--cond-damaged-bg);color:var(--cond-damaged);}
+
+  .open-item{border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;cursor:pointer;}
+  .open-item:hover{background:var(--hover-bg);}
+  .open-item.selected{background:var(--c-violet-soft);border-color:var(--c-violet);}
+  .open-item .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+  .open-item .name{font-weight:600;font-size:14px;}
+  .open-item .meta{color:var(--sub);font-size:12.5px;margin-top:2px;}
+  .open-item .check{flex-shrink:0;font-size:12px;font-weight:700;color:var(--c-violet);visibility:hidden;}
+  .open-item.selected .check{visibility:visible;}
+
+  .ci-row-controls{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+  .mini-cond{display:flex;gap:4px;}
+  .mini-cond-choice{padding:5px 8px;border-radius:6px;border:1px solid var(--border);font-size:11px;font-weight:700;color:var(--sub);cursor:pointer;white-space:nowrap;background:var(--panel);}
+  .mini-cond-choice:hover{filter:brightness(0.97);}
+  .mini-cond-choice.sel-good.selected{background:var(--cond-good-bg);color:var(--cond-good);border-color:var(--cond-good);}
+  .mini-cond-choice.sel-fair.selected{background:var(--cond-fair-bg);color:var(--cond-fair);border-color:var(--cond-fair);}
+  .mini-cond-choice.sel-damaged.selected{background:var(--cond-damaged-bg);color:var(--cond-damaged);border-color:var(--cond-damaged);}
+  .ci-notes-toggle{width:26px;height:26px;padding:0;border-radius:50%;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;color:var(--c-violet);flex-shrink:0;}
+  .ci-notes-toggle.has-note{background:var(--c-violet-soft);border-color:var(--c-violet);}
+  .ci-notes-input{margin-top:10px;width:100%;}
+
+  .activity-item{padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;}
+  .activity-item:last-child{border-bottom:none;}
+  .activity-item .meta{color:var(--sub);font-size:12px;margin-top:2px;}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;}
+  .dot.checkout{background:var(--c-pink);}
+  .dot.checkin{background:var(--cond-good);}
+
+  .modal-backdrop{display:none;position:fixed;inset:0;background:rgba(28,27,41,.35);align-items:center;justify-content:center;z-index:50;}
+  .modal-backdrop.open{display:flex;}
+  .modal{background:var(--panel);color:var(--ink);border-radius:12px;padding:20px;width:320px;}
+  .modal h3{margin-top:0;font-weight:600;}
+
+  footer.note{font-size:11.5px;color:var(--footer-muted);margin-top:24px;line-height:1.5;}
+
+  #resultModalBackdrop{z-index:70;}
+  #resultModalMessage{font-size:13.5px;line-height:1.5;margin-top:6px;}
+
+  #progressModalBackdrop{z-index:60;}
+  .progress-track{width:100%;height:8px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:12px;}
+  .progress-fill{height:100%;width:0%;background:var(--c-violet);border-radius:999px;transition:width .25s ease;}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="eyebrow">Centific · Data Collection US Hub</div>
+    <h1>Hardware Check-In/Out</h1>
+    <div class="sync-status" id="syncStatus"></div>
+  </div>
+  <div id="authStatus"></div>
+</header>
+
+<main>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="checkout">Check Out</button>
+    <button class="tab-btn" data-tab="checkin">Check In</button>
+    <button class="tab-btn" data-tab="activity">Recent Activity</button>
+  </div>
+
+  <!-- CHECK OUT -->
+  <div class="panel active" id="panel-checkout">
+    <div class="card">
+      <h3>1. Project &amp; location</h3>
+      <div class="row2">
+        <div>
+          <label>Project</label>
+          <select id="co-project"><option value="">Select a project…</option></select>
+        </div>
+        <div>
+          <label>Location</label>
+          <select id="co-location" disabled><option value="">Select a project first…</option></select>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="co-device-card" style="display:none;">
+      <h3>2. Device</h3>
+      <div class="sync-status" style="margin:-4px 0 8px;">Tap a device to select it, then set its condition and add a note if needed.</div>
+      <input type="text" id="co-device-search" placeholder="Search asset tag, model, or serial…">
+      <div class="device-list" id="co-device-list"></div>
+      <div id="co-selected-wrap"></div>
+    </div>
+
+    <div class="card" id="co-details-card" style="display:none;">
+      <div style="margin-top:2px;">
+        <button class="primary" id="co-submit" disabled style="width:100%;">Check out</button>
+      </div>
+      <div id="co-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:8px;min-height:14px;"></div>
+    </div>
+  </div>
+
+  <!-- CHECK IN -->
+  <div class="panel" id="panel-checkin">
+    <div class="card">
+      <input type="text" id="ci-search" placeholder="Search what's currently checked out… (tap items to select one or more)">
+    </div>
+    <div id="ci-list"></div>
+
+    <div class="card" id="ci-details-card" style="display:none;">
+      <div id="ci-selected-count" style="font-size:13px;color:var(--sub);font-weight:600;"></div>
+      <div style="margin-top:12px;">
+        <button class="primary" id="ci-submit" style="width:100%;">Check in</button>
+      </div>
+      <div id="ci-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:8px;min-height:14px;"></div>
+    </div>
+  </div>
+
+  <!-- ACTIVITY -->
+  <div class="panel" id="panel-activity">
+    <div class="card">
+      <div id="activity-list"></div>
+    </div>
+  </div>
+
+  <footer class="note">
+    This site only reads devices, projects, and locations from the main Hardware Tracker — it never writes back
+    to that workbook. Every check-out and check-in is logged as its own row in a separate Check-In/Out workbook,
+    so entries from every moderator merge safely without overwriting anyone else's.
+  </footer>
+</main>
+
+<div class="modal-backdrop" id="resultModalBackdrop">
+  <div class="modal">
+    <h3 id="resultModalTitle">Done</h3>
+    <div id="resultModalMessage"></div>
+    <div style="margin-top:16px;">
+      <button class="primary" id="resultModalClose" style="width:100%;">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shown while checkout/check-in requests are in flight; closes itself
+     once the batch finishes, then the result modal above takes over. -->
+<div class="modal-backdrop" id="progressModalBackdrop">
+  <div class="modal">
+    <h3 id="progressModalTitle">Working…</h3>
+    <div class="progress-track"><div class="progress-fill" id="progressModalFill"></div></div>
+    <div class="sync-status" id="progressModalText" style="margin-top:8px;"></div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="authGateBackdrop">
+  <div class="modal">
+    <h3>Sign in</h3>
+    <div id="auth-login-loading" style="font-size:12.5px;color:var(--sub);margin:-8px 0 12px;">Loading access list…</div>
+    <div id="auth-login-form" style="display:none;">
+      <label style="margin-top:0;">Login</label>
+      <input type="text" id="auth-login-input" placeholder="Enter your login" autocomplete="off">
+      <div id="auth-login-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:6px;min-height:16px;"></div>
+      <div style="margin-top:14px;">
+        <button class="primary" id="auth-login-submit" style="width:100%;">Enter</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================================
+// CONFIG — paste your two new flow URLs here once built (see SETUP.md).
+// MAIN_TRACKER_LOAD_URL is copied verbatim from the existing, already-live
+// "HWTracker - Load Data" flow on the main site — read-only, never posted to.
+// ============================================================================
+const MAIN_TRACKER_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/d685d4ce87b14c37897baef1d30041eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=tqZieZYCMgpC5imEh0w2ObioFk9tXOiTHPB-3nYmGk0";
+const LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/4838ed8350324c4ca02fb04ec2d9ef23/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=jDGVC0LF1iAcwrt1jyHjnrmytF1MI82ddmxTeUEmE5Y";
+const LOG_EVENT_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/59ef40a39a504f7c970fc016c7e6720c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=SXiLG0fI-BXn4k4bpBbQrD_Nlgw64RGn9sys5bMVqvM";
+
+const AUTH_KEY = "checkinout-auth-v1";
+const STORE_KEY = "checkinout-cache-v1";
+const MASTER = "Master Inventory";
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+let authInfo = JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); // {name, login, role} | null
+let credentialsList = [];
+let checkoutLog = JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); // flat array of event rows
+let liveDevices = []; // read-only, from the main tracker
+let liveProjects = []; // active project names, from the main tracker
+let submitting = false;
+
+function saveLocalCache(){
+  // Cap it so localStorage doesn't grow unbounded on a browser used for months.
+  if (checkoutLog.length > 500) checkoutLog = checkoutLog.slice(0, 500);
+  localStorage.setItem(STORE_KEY, JSON.stringify(checkoutLog));
+}
+
+function setSyncStatus(msg){
+  document.getElementById("syncStatus").textContent = msg || "";
+}
+
+// Deliberately a modal that has to be dismissed by hand, not an
+// auto-disappearing toast — a checkout/checkin confirmation is exactly the
+// kind of message that's easy to miss if it just fades on its own.
+function showResultModal(title, message, isError){
+  document.getElementById("resultModalTitle").textContent = title;
+  const msgEl = document.getElementById("resultModalMessage");
+  msgEl.textContent = message;
+  msgEl.style.color = isError ? "var(--cond-damaged)" : "var(--ink)";
+  document.getElementById("resultModalBackdrop").classList.add("open");
+}
+document.getElementById("resultModalClose").addEventListener("click", () => {
+  document.getElementById("resultModalBackdrop").classList.remove("open");
+});
+
+// Explicit, hard-to-miss "this is loading" indicator for a checkout/checkin
+// batch — the small sync-status line in the header does the same job, but
+// easy to overlook if nobody's told to look up there. Closes itself the
+// moment the batch finishes (success or failure); the result modal takes
+// over immediately after.
+function showProgressModal(title){
+  document.getElementById("progressModalTitle").textContent = title;
+  document.getElementById("progressModalFill").style.width = "0%";
+  document.getElementById("progressModalText").textContent = "";
+  document.getElementById("progressModalBackdrop").classList.add("open");
+}
+function updateProgressModal(text, pct){
+  document.getElementById("progressModalText").textContent = text;
+  document.getElementById("progressModalFill").style.width = Math.round(pct) + "%";
+}
+function hideProgressModal(){
+  document.getElementById("progressModalBackdrop").classList.remove("open");
+}
+
+// ---------------------------------------------------------------------------
+// Auth gate — same pattern as the main tracker: inert until the Credentials
+// table has at least one row, matches by "login", remembers the session
+// locally. Not real security — anyone reading the page source can see the
+// Excel/flow URLs — just keeps casual visitors from acting as someone else.
+// ---------------------------------------------------------------------------
+function applyCredentials(rows){
+  credentialsList = (rows || [])
+    .filter(r => r && r.login)
+    .map(r => ({ name: String(r.name || ""), login: String(r.login || "").trim(), role: String(r.role || "") }));
+}
+function findCredential(loginInput){
+  const q = String(loginInput || "").trim().toLowerCase();
+  if (!q) return null;
+  return credentialsList.find(c => c.login.toLowerCase() === q) || null;
+}
+function showAuthGate(){ document.getElementById("authGateBackdrop").classList.add("open"); }
+function hideAuthGate(){ document.getElementById("authGateBackdrop").classList.remove("open"); }
+
+function renderAuthStatus(){
+  const el = document.getElementById("authStatus");
+  if (authInfo){
+    el.innerHTML = `Signed in as <b>${authInfo.name || authInfo.login}</b> · <button id="logout-btn" class="link-btn">Sign out</button>`;
+    document.getElementById("logout-btn").addEventListener("click", () => {
+      localStorage.removeItem(AUTH_KEY);
+      location.reload();
+    });
+  } else {
+    el.textContent = "";
+  }
+}
+
+function attemptLogin(){
+  const input = document.getElementById("auth-login-input");
+  const errEl = document.getElementById("auth-login-error");
+  const match = findCredential(input.value);
+  if (!match){
+    errEl.textContent = "Login not recognized — check with an admin if this seems wrong.";
+    return;
+  }
+  authInfo = match;
+  localStorage.setItem(AUTH_KEY, JSON.stringify(authInfo));
+  errEl.textContent = "";
+  input.value = "";
+  hideAuthGate();
+  renderAuthStatus();
+  renderAll();
+}
+document.getElementById("auth-login-submit").addEventListener("click", attemptLogin);
+document.getElementById("auth-login-input").addEventListener("keydown", e => { if (e.key === "Enter") attemptLogin(); });
+
+// Unlike the main tracker (which stays inert until its Credentials table has
+// rows, so it's safe to ship before that table exists), this site requires
+// sign-in outright — there's already a real Mods list, and login should
+// block everything else rather than only gating the checkout/checkin
+// buttons themselves.
+function evaluateAuthGate(){
+  if (authInfo && !findCredential(authInfo.login)){
+    // Remembered login no longer matches anything in the Credentials table.
+    authInfo = null;
+    localStorage.removeItem(AUTH_KEY);
+    renderAuthStatus();
+  }
+  if (credentialsList.length > 0){
+    document.getElementById("auth-login-loading").style.display = "none";
+    document.getElementById("auth-login-form").style.display = "";
+  }
+  if (!authInfo) showAuthGate(); else hideAuthGate();
+}
+
+// ---------------------------------------------------------------------------
+// Data loading
+// ---------------------------------------------------------------------------
+function idsInLog(){ return new Set(checkoutLog.map(e => e.id)); }
+
+// Merge freshly-loaded rows with any local-only entries this browser just
+// submitted that the flow/Excel hasn't reflected back yet — same idea as the
+// main tracker's "recently edited locally" protection, but simpler since
+// this table is append-only: a local row either shows up remotely (in which
+// case we just use the remote copy) or it's still catching up (keep it, but
+// only for a couple of minutes — after that, trust the remote read).
+function mergeCheckoutLog(remoteRows){
+  const remote = (remoteRows || []).map(r => ({
+    id: String(r.id || ""), checkoutId: String(r.checkoutId || ""), eventType: String(r.eventType || ""),
+    ts: String(r.ts || ""), modName: String(r.modName || ""), deviceId: String(r.deviceId || ""),
+    tag: String(r.tag || ""), model: String(r.model || ""), serial: String(r.serial || ""),
+    project: String(r.project || ""), location: String(r.location || ""),
+    condition: String(r.condition || ""), notes: String(r.notes || "")
+  })).filter(r => r.id);
+  const remoteIds = new Set(remote.map(r => r.id));
+  const stillPending = checkoutLog.filter(e => e._local && !remoteIds.has(e.id) && (Date.now() - (e._addedAt || 0)) < 2 * 60 * 1000);
+  checkoutLog = [...stillPending, ...remote];
+  saveLocalCache();
+}
+
+function setAuthLoadingMessage(msg){
+  const el = document.getElementById("auth-login-loading");
+  if (el) el.textContent = msg;
+}
+
+async function loadOwnData(){
+  if (!LOAD_URL || LOAD_URL.indexOf("PASTE_YOUR") === 0){
+    setSyncStatus("Set LOAD_URL in index.html once the Load flow is built (see SETUP.md).");
+    setAuthLoadingMessage("Sign-in isn't wired up yet — LOAD_URL needs to be set in index.html.");
+    return;
+  }
+  try {
+    // This flow's trigger is configured to require POST (unlike the main
+    // tracker's Load flow, which accepts a plain GET) — no body needed,
+    // just the method.
+    const res = await fetch(LOAD_URL, { method: "POST" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    applyCredentials(data.credentials || []);
+    evaluateAuthGate();
+    mergeCheckoutLog(data.checkoutLog || []);
+    renderAll();
+  } catch (err){
+    console.error("Check-in/out load failed:", err);
+    setAuthLoadingMessage("Couldn't load the access list — check LOAD_URL and the Load Data flow, then reload.");
+  }
+}
+
+async function loadMainTrackerData(){
+  try {
+    const res = await fetch(MAIN_TRACKER_LOAD_URL);
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    liveDevices = (data.devices || []).map(d => ({
+      id: String(d.id || ""), tag: String(d.tag || "—"), model: String(d.model || ""),
+      serial: String(d.serial || "—"), status: String(d.status || "instock"),
+      bucket: String(d.bucket || MASTER), location: String(d.location || "")
+    }));
+    const archivedNames = new Set((data.projects || []).filter(p => String(p.archived).toLowerCase() === "true").map(p => String(p.name)));
+    // Master Inventory is the admin-only holding pool, not a field project —
+    // mods only ever check items in/out of an actual project, so it's
+    // deliberately excluded from this list.
+    liveProjects = [...new Set(liveDevices.map(d => d.bucket))]
+      .filter((b, i, arr) => arr.indexOf(b) === i && b !== MASTER && !archivedNames.has(b));
+    renderProjectOptions();
+  } catch (err){
+    console.error("Main tracker load failed:", err);
+    setSyncStatus("Couldn't reach the main Hardware Tracker — device list may be stale.");
+  }
+}
+
+async function loadAll(){
+  setSyncStatus("Syncing…");
+  await Promise.all([loadMainTrackerData(), loadOwnData()]);
+  setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
+}
+
+// ---------------------------------------------------------------------------
+// Derived data
+// ---------------------------------------------------------------------------
+// A device counts as "out" from this system's point of view if it has a
+// checkout event with no later checkin event sharing the same checkoutId —
+// regardless of what the main tracker's own status field says, since this
+// site never touches that field.
+function openCheckouts(){
+  const byCheckoutId = {};
+  checkoutLog.forEach(e => {
+    if (!byCheckoutId[e.checkoutId]) byCheckoutId[e.checkoutId] = {};
+    byCheckoutId[e.checkoutId][e.eventType] = e;
+  });
+  return Object.values(byCheckoutId)
+    .filter(pair => pair.checkout && !pair.checkin)
+    .map(pair => pair.checkout)
+    .sort((a, b) => (b._addedAt || 0) - (a._addedAt || 0) || b.ts.localeCompare(a.ts));
+}
+function openDeviceIds(){ return new Set(openCheckouts().map(c => c.deviceId).filter(Boolean)); }
+
+function availableDevicesFor(project, location){
+  const outIds = openDeviceIds();
+  // Deliberately NOT filtering on status === "instock" — once a device is
+  // assigned to a project it's normally marked "inuse" on the main tracker
+  // (that's just how deployed gear reads there), so requiring "instock"
+  // would make every real project's device list come up empty. Only
+  // "broken" gear is excluded; whether a specific unit is currently held by
+  // a mod is tracked independently via this site's own open-checkout log.
+  return liveDevices.filter(d =>
+    d.status !== "broken" &&
+    d.bucket === project &&
+    d.location === location &&
+    !outIds.has(d.id)
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tabs
+// ---------------------------------------------------------------------------
+document.querySelectorAll(".tab-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
+    btn.classList.add("active");
+    document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// CHECK OUT panel
+// ---------------------------------------------------------------------------
+// deviceId -> { device, condition, notes, notesOpen }. Each selected device
+// carries its own condition/notes now, set inline on its row — same pattern
+// as the Check In panel — rather than one shared value for the whole batch.
+let coSelectedDevices = new Map();
+
+function renderProjectOptions(){
+  const sel = document.getElementById("co-project");
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Select a project…</option>' +
+    liveProjects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+  if (liveProjects.includes(current)) sel.value = current;
+}
+
+function renderLocationOptions(){
+  const projectSel = document.getElementById("co-project");
+  const locSel = document.getElementById("co-location");
+  const project = projectSel.value;
+  if (!project){
+    locSel.innerHTML = '<option value="">Select a project first…</option>';
+    locSel.disabled = true;
+    document.getElementById("co-device-card").style.display = "none";
+    document.getElementById("co-details-card").style.display = "none";
+    return;
+  }
+  const locations = [...new Set(liveDevices.filter(d => d.bucket === project && d.status !== "broken").map(d => d.location))].filter(Boolean);
+  const current = locSel.value;
+  locSel.innerHTML = '<option value="">Select a location…</option>' +
+    locations.map(l => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join("");
+  locSel.disabled = false;
+  if (locations.includes(current)) locSel.value = current;
+}
+
+document.getElementById("co-project").addEventListener("change", () => {
+  renderLocationOptions();
+  renderDeviceList();
+});
+document.getElementById("co-location").addEventListener("change", () => {
+  coSelectedDevices.clear();
+  renderDeviceList();
+});
+document.getElementById("co-device-search").addEventListener("input", renderDeviceList);
+
+function renderDeviceList(){
+  const project = document.getElementById("co-project").value;
+  const location = document.getElementById("co-location").value;
+  const deviceCard = document.getElementById("co-device-card");
+  const detailsCard = document.getElementById("co-details-card");
+  if (!project || !location){
+    deviceCard.style.display = "none";
+    detailsCard.style.display = "none";
+    return;
+  }
+  deviceCard.style.display = "";
+  const q = document.getElementById("co-device-search").value.trim().toLowerCase();
+  const devices = availableDevicesFor(project, location).filter(d =>
+    !q || [d.tag, d.model, d.serial].join(" ").toLowerCase().includes(q)
+  );
+  const listEl = document.getElementById("co-device-list");
+  if (devices.length === 0){
+    listEl.innerHTML = '<div class="empty-hint">No available devices match this project, location, and search.</div>';
+  } else {
+    listEl.innerHTML = devices.map(d => {
+      const rec = coSelectedDevices.get(d.id);
+      const selected = !!rec;
+      const condition = rec ? rec.condition : "Good";
+      const rightControls = selected ? `
+          <div class="ci-row-controls">
+            <div class="mini-cond">
+              <div class="mini-cond-choice sel-good ${condition === "Good" ? "selected" : ""}" data-cond="Good">Good</div>
+              <div class="mini-cond-choice sel-fair ${condition === "Fair" ? "selected" : ""}" data-cond="Fair">Fair</div>
+              <div class="mini-cond-choice sel-damaged ${condition === "Damaged" ? "selected" : ""}" data-cond="Damaged">Damaged</div>
+            </div>
+            <button class="ci-notes-toggle ${rec.notes ? "has-note" : ""}" title="Add a note">+</button>
+          </div>` : '<span class="check">✓ selected</span>';
+      const notesBlock = (selected && rec.notesOpen)
+        ? `<textarea class="ci-notes-input" placeholder="Note for this device…">${escapeHtml(rec.notes)}</textarea>`
+        : "";
+      return `
+      <div class="device-item ${selected ? "selected" : ""}" data-id="${escapeHtml(d.id)}" style="flex-direction:column;align-items:stretch;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div>
+            <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
+            <div class="meta">Serial ${escapeHtml(d.serial)}</div>
+          </div>
+          ${rightControls}
+        </div>
+        ${notesBlock}
+      </div>`;
+    }).join("");
+
+    listEl.querySelectorAll(".device-item").forEach(el => {
+      const id = el.dataset.id;
+      const d = devices.find(dv => dv.id === id);
+      if (!d) return;
+
+      el.addEventListener("click", () => {
+        if (coSelectedDevices.has(id)) coSelectedDevices.delete(id);
+        else coSelectedDevices.set(id, { device: d, condition: "Good", notes: "", notesOpen: false });
+        renderDeviceList();
+      });
+
+      el.querySelectorAll(".mini-cond-choice").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const rec = coSelectedDevices.get(id);
+          if (!rec) return;
+          rec.condition = btn.dataset.cond;
+          renderDeviceList();
+        });
+      });
+
+      const notesToggle = el.querySelector(".ci-notes-toggle");
+      if (notesToggle){
+        notesToggle.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const rec = coSelectedDevices.get(id);
+          if (!rec) return;
+          rec.notesOpen = !rec.notesOpen;
+          renderDeviceList();
+        });
+      }
+
+      const notesInput = el.querySelector(".ci-notes-input");
+      if (notesInput){
+        notesInput.addEventListener("click", (e) => e.stopPropagation());
+        notesInput.addEventListener("input", (e) => {
+          const rec = coSelectedDevices.get(id);
+          if (rec) rec.notes = e.target.value;
+        });
+      }
+    });
+  }
+  renderSelectedDevices();
+}
+
+function renderSelectedDevices(){
+  const wrap = document.getElementById("co-selected-wrap");
+  const detailsCard = document.getElementById("co-details-card");
+  const entries = [...coSelectedDevices.entries()]; // [deviceId, {device, condition, notes}]
+  if (entries.length === 0){
+    wrap.innerHTML = "";
+    detailsCard.style.display = "none";
+    updateSubmitEnabled();
+    return;
+  }
+  wrap.innerHTML = `
+    <div class="selected-header">
+      <span class="count">${entries.length} device${entries.length === 1 ? "" : "s"} selected</span>
+      <button class="link-btn" id="co-clear-all">Clear all</button>
+    </div>
+    <div class="selected-list">
+      ${entries.map(([id, rec]) => `
+        <div class="selected-row" data-id="${escapeHtml(id)}">
+          <div>
+            <div class="name">${escapeHtml(rec.device.tag)} — ${escapeHtml(rec.device.model)}</div>
+            <div class="meta">Serial ${escapeHtml(rec.device.serial)} · <span class="pill ${rec.condition.toLowerCase()}">${escapeHtml(rec.condition)}</span></div>
+          </div>
+          <button class="remove-btn" data-id="${escapeHtml(id)}" title="Remove">✕</button>
+        </div>`).join("")}
+    </div>`;
+  document.getElementById("co-clear-all").addEventListener("click", () => {
+    coSelectedDevices.clear();
+    renderDeviceList();
+  });
+  wrap.querySelectorAll(".remove-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      coSelectedDevices.delete(btn.dataset.id);
+      renderDeviceList();
+    });
+  });
+  detailsCard.style.display = "";
+  updateSubmitEnabled();
+}
+
+function updateSubmitEnabled(){
+  const btn = document.getElementById("co-submit");
+  const n = coSelectedDevices.size;
+  btn.disabled = n === 0 || submitting;
+  if (submitting){
+    btn.textContent = "Checking out…";
+  } else {
+    btn.textContent = n > 1 ? `Check out ${n} devices` : "Check out";
+  }
+}
+
+document.getElementById("co-submit").addEventListener("click", async () => {
+  if (coSelectedDevices.size === 0 || submitting) return;
+  if (!authInfo){ showAuthGate(); return; }
+  const project = document.getElementById("co-project").value;
+  const location = document.getElementById("co-location").value;
+  const entries = [...coSelectedDevices.entries()]; // [deviceId, {device, condition, notes}]
+  const errEl = document.getElementById("co-error");
+  errEl.textContent = "";
+
+  submitting = true;
+  updateSubmitEnabled();
+  showProgressModal("Checking out…");
+  const failed = [];
+  for (let i = 0; i < entries.length; i++){
+    const [id, rec] = entries[i];
+    const d = rec.device;
+    if (entries.length > 1) setSyncStatus(`Checking out ${i + 1} of ${entries.length}…`);
+    updateProgressModal(`${d.tag} — ${d.model} (${i + 1} of ${entries.length})`, (i / entries.length) * 100);
+    const event = {
+      id: "evt-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
+      checkoutId: "co-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
+      eventType: "checkout", ts: new Date().toLocaleString(),
+      modName: authInfo.name || authInfo.login,
+      deviceId: d.id, tag: d.tag, model: d.model, serial: d.serial,
+      project, location, condition: rec.condition, notes: rec.notes.trim()
+    };
+    // Sequential on purpose — several Run Script calls hitting the same
+    // Excel file at the exact same instant can get throttled by Excel
+    // Online, so batches go one at a time rather than all in parallel.
+    const result = await postEvent(event);
+    if (!result.ok) failed.push({ id, rec, tag: d.tag });
+    updateProgressModal(`${d.tag} — ${d.model} (${i + 1} of ${entries.length})`, ((i + 1) / entries.length) * 100);
+  }
+  submitting = false;
+  hideProgressModal();
+
+  if (failed.length > 0){
+    const failedTags = failed.map(f => f.tag);
+    errEl.textContent = `Checked out ${entries.length - failed.length} of ${entries.length} — couldn't reach the server for: ${failedTags.join(", ")}. Try again for those.`;
+    showResultModal("Some checkouts failed", `Checked out ${entries.length - failed.length} of ${entries.length}. Couldn't reach the server for: ${failedTags.join(", ")}. Try again for those.`, true);
+    // Keep only the failed ones selected (with their condition/notes intact) so retrying doesn't re-submit ones that already succeeded.
+    coSelectedDevices = new Map(failed.map(f => [f.id, f.rec]));
+  } else {
+    const names = entries.map(([, rec]) => `${rec.device.tag} (${rec.device.model})`).join(", ");
+    showResultModal("Checked out", entries.length > 1 ? `Checked out ${entries.length} devices: ${names}.` : `Checked out ${names}.`);
+    coSelectedDevices.clear();
+    document.getElementById("co-device-search").value = "";
+  }
+  setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
+  renderAll();
+});
+
+// ---------------------------------------------------------------------------
+// CHECK IN panel
+// ---------------------------------------------------------------------------
+document.getElementById("ci-search").addEventListener("input", renderCheckinList);
+
+// checkoutId -> { event, condition, notes, notesOpen }. Each selected item
+// carries its OWN condition/notes now (set inline on its row) rather than
+// one shared value applied to the whole batch.
+let ciSelected = new Map();
+
+function renderCheckinList(){
+  const q = document.getElementById("ci-search").value.trim().toLowerCase();
+  const open = openCheckouts().filter(c =>
+    !q || [c.tag, c.model, c.serial, c.project, c.location, c.modName].join(" ").toLowerCase().includes(q)
+  );
+  // Drop selections for anything that's no longer open (e.g. checked in from another tab/session).
+  const openIds = new Set(openCheckouts().map(c => c.checkoutId));
+  [...ciSelected.keys()].forEach(id => { if (!openIds.has(id)) ciSelected.delete(id); });
+
+  const listEl = document.getElementById("ci-list");
+  if (open.length === 0){
+    listEl.innerHTML = '<div class="empty-hint">Nothing is currently checked out.</div>';
+  } else {
+    listEl.innerHTML = open.map(c => {
+      const rec = ciSelected.get(c.checkoutId);
+      const selected = !!rec;
+      const condition = rec ? rec.condition : "Good";
+      const rightControls = selected ? `
+          <div class="ci-row-controls">
+            <div class="mini-cond">
+              <div class="mini-cond-choice sel-good ${condition === "Good" ? "selected" : ""}" data-cond="Good">Good</div>
+              <div class="mini-cond-choice sel-fair ${condition === "Fair" ? "selected" : ""}" data-cond="Fair">Fair</div>
+              <div class="mini-cond-choice sel-damaged ${condition === "Damaged" ? "selected" : ""}" data-cond="Damaged">Damaged</div>
+            </div>
+            <button class="ci-notes-toggle ${rec.notes ? "has-note" : ""}" title="Add a note">+</button>
+          </div>` : '<span class="check">✓ selected</span>';
+      const notesBlock = (selected && rec.notesOpen)
+        ? `<textarea class="ci-notes-input" placeholder="Note for this item…">${escapeHtml(rec.notes)}</textarea>`
+        : "";
+      return `
+      <div class="open-item ${selected ? "selected" : ""}" data-checkout-id="${escapeHtml(c.checkoutId)}">
+        <div class="top">
+          <div>
+            <div class="name">${escapeHtml(c.tag)} — ${escapeHtml(c.model)}</div>
+            <div class="meta">Serial ${escapeHtml(c.serial)} · ${escapeHtml(c.project)} / ${escapeHtml(c.location)}</div>
+            <div class="meta">Checked out by ${escapeHtml(c.modName)} · ${escapeHtml(c.ts)}</div>
+          </div>
+          ${rightControls}
+        </div>
+        ${notesBlock}
+      </div>`;
+    }).join("");
+
+    listEl.querySelectorAll(".open-item").forEach(el => {
+      const checkoutId = el.dataset.checkoutId;
+      const c = open.find(o => o.checkoutId === checkoutId);
+      if (!c) return;
+
+      el.addEventListener("click", () => {
+        if (!authInfo){ showAuthGate(); return; }
+        if (ciSelected.has(checkoutId)) ciSelected.delete(checkoutId);
+        else ciSelected.set(checkoutId, { event: c, condition: "Good", notes: "", notesOpen: false });
+        renderCheckinList();
+      });
+
+      el.querySelectorAll(".mini-cond-choice").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const rec = ciSelected.get(checkoutId);
+          if (!rec) return;
+          rec.condition = btn.dataset.cond;
+          renderCheckinList();
+        });
+      });
+
+      const notesToggle = el.querySelector(".ci-notes-toggle");
+      if (notesToggle){
+        notesToggle.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const rec = ciSelected.get(checkoutId);
+          if (!rec) return;
+          rec.notesOpen = !rec.notesOpen;
+          renderCheckinList();
+        });
+      }
+
+      const notesInput = el.querySelector(".ci-notes-input");
+      if (notesInput){
+        notesInput.addEventListener("click", (e) => e.stopPropagation());
+        // Just store the value — no re-render on every keystroke, or the
+        // textarea would lose focus/cursor position while typing.
+        notesInput.addEventListener("input", (e) => {
+          const rec = ciSelected.get(checkoutId);
+          if (rec) rec.notes = e.target.value;
+        });
+      }
+    });
+  }
+  renderCheckinDetails();
+}
+
+function renderCheckinDetails(){
+  const card = document.getElementById("ci-details-card");
+  const countEl = document.getElementById("ci-selected-count");
+  const n = ciSelected.size;
+  if (n === 0){
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "";
+  countEl.textContent = `${n} item${n === 1 ? "" : "s"} selected for check-in`;
+  updateCiSubmitEnabled();
+}
+
+function updateCiSubmitEnabled(){
+  const btn = document.getElementById("ci-submit");
+  const n = ciSelected.size;
+  btn.disabled = n === 0 || submitting;
+  if (submitting){
+    btn.textContent = "Checking in…";
+  } else {
+    btn.textContent = n > 1 ? `Check in ${n} items` : "Check in";
+  }
+}
+
+document.getElementById("ci-submit").addEventListener("click", async () => {
+  if (ciSelected.size === 0 || submitting) return;
+  if (!authInfo){ showAuthGate(); return; }
+  const entries = [...ciSelected.entries()]; // [checkoutId, {event, condition, notes}]
+  const errEl = document.getElementById("ci-error");
+  errEl.textContent = "";
+
+  submitting = true;
+  updateCiSubmitEnabled();
+  updateSubmitEnabled(); // keep the Check Out button's disabled state in sync too
+  showProgressModal("Checking in…");
+  const failed = [];
+  for (let i = 0; i < entries.length; i++){
+    const [checkoutId, rec] = entries[i];
+    const c = rec.event;
+    if (entries.length > 1) setSyncStatus(`Checking in ${i + 1} of ${entries.length}…`);
+    updateProgressModal(`${c.tag} — ${c.model} (${i + 1} of ${entries.length})`, (i / entries.length) * 100);
+    const submitEvt = {
+      id: "evt-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
+      checkoutId, eventType: "checkin", ts: new Date().toLocaleString(),
+      modName: authInfo.name || authInfo.login,
+      deviceId: c.deviceId, tag: c.tag, model: c.model, serial: c.serial,
+      project: c.project, location: c.location, condition: rec.condition, notes: rec.notes.trim()
+    };
+    // Sequential, same reasoning as the checkout batch — avoids hammering
+    // Excel Online with simultaneous Run Script calls.
+    const result = await postEvent(submitEvt);
+    if (!result.ok) failed.push({ checkoutId, rec, tag: c.tag });
+    updateProgressModal(`${c.tag} — ${c.model} (${i + 1} of ${entries.length})`, ((i + 1) / entries.length) * 100);
+  }
+  submitting = false;
+  hideProgressModal();
+
+  if (failed.length > 0){
+    const failedTags = failed.map(f => f.tag);
+    errEl.textContent = `Checked in ${entries.length - failed.length} of ${entries.length} — couldn't reach the server for: ${failedTags.join(", ")}. Try again for those.`;
+    showResultModal("Some check-ins failed", `Checked in ${entries.length - failed.length} of ${entries.length}. Couldn't reach the server for: ${failedTags.join(", ")}. Try again for those.`, true);
+    // Keep only the failed ones selected (with their condition/notes intact) so retrying doesn't re-submit ones that already succeeded.
+    ciSelected = new Map(failed.map(f => [f.checkoutId, f.rec]));
+  } else {
+    const names = entries.map(([, rec]) => `${rec.event.tag} (${rec.event.model})`).join(", ");
+    showResultModal("Checked in", entries.length > 1 ? `Checked in ${entries.length} items: ${names}.` : `Checked in ${names}.`);
+    ciSelected.clear();
+  }
+  setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
+  renderAll();
+});
+
+// ---------------------------------------------------------------------------
+// ACTIVITY panel
+// ---------------------------------------------------------------------------
+function renderActivity(){
+  const items = [...checkoutLog]
+    .sort((a, b) => (b._addedAt || 0) - (a._addedAt || 0) || String(b.ts).localeCompare(String(a.ts)))
+    .slice(0, 40);
+  const listEl = document.getElementById("activity-list");
+  if (items.length === 0){
+    listEl.innerHTML = '<div class="empty-hint">No activity yet.</div>';
+    return;
+  }
+  listEl.innerHTML = items.map(e => `
+    <div class="activity-item">
+      <div><span class="dot ${escapeHtml(e.eventType)}"></span><b>${e.eventType === "checkout" ? "Checked out" : "Checked in"}</b> — ${escapeHtml(e.tag)} (${escapeHtml(e.model)}, ${escapeHtml(e.serial)})</div>
+      <div class="meta">${escapeHtml(e.modName)} · ${escapeHtml(e.project)} / ${escapeHtml(e.location)} · ${escapeHtml(e.ts)} · <span class="pill ${e.condition.toLowerCase()}">${escapeHtml(e.condition)}</span>${e.notes ? " · " + escapeHtml(e.notes) : ""}</div>
+    </div>`).join("");
+}
+
+// ---------------------------------------------------------------------------
+// Submitting events (shared by check-out and check-in)
+// ---------------------------------------------------------------------------
+// Low-level: posts one event, appends it locally on success. No UI-state
+// side effects (no submitting flag, no error text) so it's safe to call in
+// a loop for a multi-device checkout batch as well as a single check-in.
+async function postEvent(event){
+  if (!LOG_EVENT_URL || LOG_EVENT_URL.indexOf("PASTE_YOUR") === 0){
+    return { ok: false, message: "Set LOG_EVENT_URL in index.html once the Log Event flow is built (see SETUP.md)." };
+  }
+  try {
+    const res = await fetch(LOG_EVENT_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: event.id, checkoutId: event.checkoutId, eventType: event.eventType, ts: event.ts,
+        modName: event.modName, deviceId: event.deviceId, tag: event.tag, model: event.model, serial: event.serial,
+        project: event.project, location: event.location, condition: event.condition, notes: event.notes
+      })
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    // Optimistic local append so the UI reflects this immediately, rather
+    // than waiting for the next poll — Excel/Power Automate can take a few
+    // seconds to make a just-written row show up in a "List rows" read.
+    checkoutLog.unshift({ ...event, _local: true, _addedAt: Date.now() });
+    saveLocalCache();
+    return { ok: true };
+  } catch (err){
+    console.error("Log event failed:", err);
+    return { ok: false, message: "Couldn't reach the server — try again in a moment." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Render everything + polling
+// ---------------------------------------------------------------------------
+function renderAll(){
+  renderDeviceList();
+  renderCheckinList();
+  renderActivity();
+}
+
+function escapeHtml(s){
+  return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+
+renderAuthStatus();
+renderAll();
+// Block immediately if there's no remembered login — don't wait on the
+// Load flow to finish before requiring sign-in. If a login IS remembered
+// from before, leave the gate down optimistically; evaluateAuthGate() will
+// pop it back open once credentials load if that login turns out invalid.
+if (!authInfo) showAuthGate();
+loadAll();
+setInterval(() => { if (document.visibilityState === "visible" && !submitting) loadAll(); }, 20000);
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !submitting) loadAll();
+});
+</script>
+</body>
+</html>
