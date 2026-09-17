@@ -143,7 +143,8 @@
   <!-- CHECK OUT -->
   <div class="panel active" id="panel-checkout">
     <div class="card">
-      <h3>1. Project &amp; location</h3>
+      <h3>1. Equipment origin</h3>
+      <div class="sync-status" style="margin:-4px 0 8px;">Where this equipment is normally held, per the main Hardware Tracker.</div>
       <div class="row2">
         <div>
           <label>Project</label>
@@ -163,6 +164,16 @@
       <div class="kit-chip-row" id="co-kit-chips"></div>
       <div class="device-list" id="co-device-list"></div>
       <div id="co-selected-wrap"></div>
+    </div>
+
+    <div class="card" id="co-destination-card" style="display:none;">
+      <h3>3. Destination <span style="font-weight:400;color:var(--sub);">(optional)</span></h3>
+      <div class="sync-status" style="margin:-4px 0 8px;">Where is this equipment actually going? Leave blank if it's staying at/near the origin above.</div>
+      <select id="co-destination">
+        <option value="">Not specified</option>
+        <option value="__other__">Other — type a new destination…</option>
+      </select>
+      <input type="text" id="co-destination-other" placeholder="e.g. Client Site — Seattle Office" style="display:none;margin-top:8px;">
     </div>
 
     <div class="card" id="co-details-card" style="display:none;">
@@ -261,6 +272,7 @@ let credentialsList = [];
 let checkoutLog = JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); // flat array of event rows
 let liveDevices = []; // read-only, from the main tracker
 let liveProjects = []; // active project names, from the main tracker
+let liveDestinations = []; // admin-maintained list, from this site's own Destinations tab
 let submitting = false;
 
 function saveLocalCache(){
@@ -393,6 +405,7 @@ function mergeCheckoutLog(remoteRows){
     ts: String(r.ts || ""), modName: String(r.modName || ""), deviceId: String(r.deviceId || ""),
     tag: String(r.tag || ""), model: String(r.model || ""), serial: String(r.serial || ""),
     project: String(r.project || ""), location: String(r.location || ""),
+    destination: String(r.destination || ""),
     condition: String(r.condition || ""), notes: String(r.notes || "")
   })).filter(r => r.id);
   const remoteIds = new Set(remote.map(r => r.id));
@@ -422,6 +435,12 @@ async function loadOwnData(){
     applyCredentials(data.credentials || []);
     evaluateAuthGate();
     mergeCheckoutLog(data.checkoutLog || []);
+    // Destinations is a simple admin-maintained list (own Destinations tab in
+    // this site's workbook) — optional on the Load flow's response, so an
+    // older/not-yet-updated flow just means an empty list (dropdown still
+    // works via "Other, type your own").
+    liveDestinations = [...new Set((data.destinations || []).map(d => String(d.name || d || "").trim()).filter(Boolean))].sort();
+    renderDestinationOptions();
     renderAll();
   } catch (err){
     console.error("Check-in/out load failed:", err);
@@ -545,6 +564,32 @@ function renderProjectOptions(){
   if (liveProjects.includes(current)) sel.value = current;
 }
 
+// Destination is a separate concept from the project/location "origin"
+// above — origin is where the equipment normally lives (per the main
+// tracker), destination is wherever it's actually being taken this trip,
+// which may not be anywhere in the main tracker's Projects/Locations at all
+// (a client site, an external shoot location, etc). One shared value covers
+// the whole checkout batch, not per-device.
+function renderDestinationOptions(){
+  const sel = document.getElementById("co-destination");
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Not specified</option>' +
+    liveDestinations.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("") +
+    '<option value="__other__">Other — type a new destination…</option>';
+  if (current && (liveDestinations.includes(current) || current === "__other__")) sel.value = current;
+}
+document.getElementById("co-destination").addEventListener("change", (e) => {
+  document.getElementById("co-destination-other").style.display = e.target.value === "__other__" ? "" : "none";
+});
+// Resolves the dropdown + optional free-text into the single string that
+// actually gets logged — "Other" with nothing typed just falls back to
+// "not specified" rather than logging the literal placeholder value.
+function getSelectedDestination(){
+  const sel = document.getElementById("co-destination").value;
+  if (sel === "__other__") return document.getElementById("co-destination-other").value.trim();
+  return sel;
+}
+
 function renderLocationOptions(){
   const projectSel = document.getElementById("co-project");
   const locSel = document.getElementById("co-location");
@@ -553,6 +598,7 @@ function renderLocationOptions(){
     locSel.innerHTML = '<option value="">Select a project first…</option>';
     locSel.disabled = true;
     document.getElementById("co-device-card").style.display = "none";
+    document.getElementById("co-destination-card").style.display = "none";
     document.getElementById("co-details-card").style.display = "none";
     return;
   }
@@ -611,14 +657,17 @@ function renderDeviceList(){
   const project = document.getElementById("co-project").value;
   const location = document.getElementById("co-location").value;
   const deviceCard = document.getElementById("co-device-card");
+  const destinationCard = document.getElementById("co-destination-card");
   const detailsCard = document.getElementById("co-details-card");
   if (!project || !location){
     deviceCard.style.display = "none";
+    destinationCard.style.display = "none";
     detailsCard.style.display = "none";
     document.getElementById("co-kit-chips").innerHTML = "";
     return;
   }
   deviceCard.style.display = "";
+  destinationCard.style.display = "";
   const q = document.getElementById("co-device-search").value.trim().toLowerCase();
   const allAvailable = availableDevicesFor(project, location);
   const devices = allAvailable.filter(d =>
@@ -758,6 +807,7 @@ document.getElementById("co-submit").addEventListener("click", async () => {
   if (!authInfo){ showAuthGate(); return; }
   const project = document.getElementById("co-project").value;
   const location = document.getElementById("co-location").value;
+  const destination = getSelectedDestination();
   const entries = [...coSelectedDevices.entries()]; // [deviceId, {device, condition, notes}]
   const errEl = document.getElementById("co-error");
   errEl.textContent = "";
@@ -777,7 +827,7 @@ document.getElementById("co-submit").addEventListener("click", async () => {
       eventType: "checkout", ts: new Date().toLocaleString(),
       modName: authInfo.name || authInfo.login,
       deviceId: d.id, tag: d.tag, model: d.model, serial: d.serial,
-      project, location, condition: rec.condition, notes: rec.notes.trim()
+      project, location, destination, condition: rec.condition, notes: rec.notes.trim()
     };
     // Sequential on purpose — several Run Script calls hitting the same
     // Excel file at the exact same instant can get throttled by Excel
@@ -800,6 +850,9 @@ document.getElementById("co-submit").addEventListener("click", async () => {
     showResultModal("Checked out", entries.length > 1 ? `Checked out ${entries.length} devices: ${names}.` : `Checked out ${names}.`);
     coSelectedDevices.clear();
     document.getElementById("co-device-search").value = "";
+    document.getElementById("co-destination").value = "";
+    document.getElementById("co-destination-other").value = "";
+    document.getElementById("co-destination-other").style.display = "none";
   }
   setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
   renderAll();
@@ -895,7 +948,7 @@ function renderCheckinList(){
         <div class="top">
           <div>
             <div class="name">${escapeHtml(c.tag)} — ${escapeHtml(c.model)}</div>
-            <div class="meta">Serial ${escapeHtml(c.serial)} · ${escapeHtml(c.project)} / ${escapeHtml(c.location)}</div>
+            <div class="meta">Serial ${escapeHtml(c.serial)} · ${escapeHtml(c.project)} / ${escapeHtml(c.location)}${c.destination ? ` → ${escapeHtml(c.destination)}` : ""}</div>
             <div class="meta">Checked out by ${escapeHtml(c.modName)} · ${escapeHtml(c.ts)}</div>
           </div>
           ${rightControls}
@@ -998,7 +1051,8 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
       checkoutId, eventType: "checkin", ts: new Date().toLocaleString(),
       modName: authInfo.name || authInfo.login,
       deviceId: c.deviceId, tag: c.tag, model: c.model, serial: c.serial,
-      project: c.project, location: c.location, condition: rec.condition, notes: rec.notes.trim()
+      project: c.project, location: c.location, destination: c.destination || "",
+      condition: rec.condition, notes: rec.notes.trim()
     };
     // Sequential, same reasoning as the checkout batch — avoids hammering
     // Excel Online with simultaneous Run Script calls.
@@ -1039,7 +1093,7 @@ function renderActivity(){
   listEl.innerHTML = items.map(e => `
     <div class="activity-item">
       <div><span class="dot ${escapeHtml(e.eventType)}"></span><b>${e.eventType === "checkout" ? "Checked out" : "Checked in"}</b> — ${escapeHtml(e.tag)} (${escapeHtml(e.model)}, ${escapeHtml(e.serial)})</div>
-      <div class="meta">${escapeHtml(e.modName)} · ${escapeHtml(e.project)} / ${escapeHtml(e.location)} · ${escapeHtml(e.ts)} · <span class="pill ${e.condition.toLowerCase()}">${escapeHtml(e.condition)}</span>${e.notes ? " · " + escapeHtml(e.notes) : ""}</div>
+      <div class="meta">${escapeHtml(e.modName)} · ${escapeHtml(e.project)} / ${escapeHtml(e.location)}${e.destination ? ` → ${escapeHtml(e.destination)}` : ""} · ${escapeHtml(e.ts)} · <span class="pill ${e.condition.toLowerCase()}">${escapeHtml(e.condition)}</span>${e.notes ? " · " + escapeHtml(e.notes) : ""}</div>
     </div>`).join("");
 }
 
@@ -1060,7 +1114,8 @@ async function postEvent(event){
       body: JSON.stringify({
         id: event.id, checkoutId: event.checkoutId, eventType: event.eventType, ts: event.ts,
         modName: event.modName, deviceId: event.deviceId, tag: event.tag, model: event.model, serial: event.serial,
-        project: event.project, location: event.location, condition: event.condition, notes: event.notes
+        project: event.project, location: event.location, destination: event.destination || "",
+        condition: event.condition, notes: event.notes
       })
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
