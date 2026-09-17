@@ -53,9 +53,12 @@
   .empty-hint{padding:14px;color:var(--sub);font-size:12.5px;text-align:center;}
 
   .kit-chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
-  .kit-chip{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:999px;border:1px solid var(--c-pink);background:var(--c-pink-soft);color:var(--c-pink);font-size:12.5px;font-weight:600;cursor:pointer;}
+  .kit-chip{position:relative;display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:999px;border:1px solid var(--c-pink);background:var(--c-pink-soft);color:var(--c-pink);font-size:12.5px;font-weight:600;cursor:pointer;}
   .kit-chip:hover{filter:brightness(0.97);}
   .kit-chip.all-selected{background:var(--c-pink);color:#fff;}
+  .kit-tooltip{position:absolute;bottom:calc(100% + 7px);left:0;min-width:140px;max-width:220px;background:var(--ink);color:#fff;padding:8px 10px;border-radius:8px;font-size:11.5px;font-weight:500;line-height:1.5;white-space:normal;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .12s ease;box-shadow:0 6px 16px rgba(0,0,0,.18);z-index:30;}
+  .kit-tooltip b{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#fbcfe8;margin-bottom:3px;}
+  .kit-chip:hover .kit-tooltip{opacity:1;visibility:visible;}
 
   .selected-header{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;}
   .selected-header .count{font-size:12px;color:var(--sub);font-weight:600;}
@@ -507,6 +510,13 @@ function kitGroups(devices){
   return Object.keys(byKit).sort().filter(k => byKit[k].length >= 2).map(k => ({ kit: k, devices: byKit[k] }));
 }
 
+// Small hover preview listing what's actually in a kit (model names), so a
+// mod can tell "Kit 1" and "Kit 2" apart without opening anything.
+function kitTooltipHtml(devices){
+  const items = devices.map(d => escapeHtml(d.model || "Unnamed item")).join("<br>");
+  return `<div class="kit-tooltip"><b>Includes</b>${items}</div>`;
+}
+
 // ---------------------------------------------------------------------------
 // Tabs
 // ---------------------------------------------------------------------------
@@ -577,7 +587,7 @@ function renderCoKitChips(allAvailable){
   wrap.innerHTML = groups.map(g => {
     const selectedCount = g.devices.filter(d => coSelectedDevices.has(d.id)).length;
     const allSelected = selectedCount === g.devices.length;
-    return `<div class="kit-chip ${allSelected ? "all-selected" : ""}" data-kit="${escapeHtml(g.kit)}">🧩 ${escapeHtml(g.kit)} · ${selectedCount}/${g.devices.length}</div>`;
+    return `<div class="kit-chip ${allSelected ? "all-selected" : ""}" data-kit="${escapeHtml(g.kit)}">🧩 ${escapeHtml(g.kit)} · ${selectedCount}/${g.devices.length}${kitTooltipHtml(g.devices)}</div>`;
   }).join("");
   wrap.querySelectorAll(".kit-chip").forEach(chip => {
     chip.addEventListener("click", () => {
@@ -829,7 +839,7 @@ function renderCiKitChips(){
   wrap.innerHTML = groups.map(g => {
     const selectedCount = g.devices.filter(c => ciSelected.has(c.checkoutId)).length;
     const allSelected = selectedCount === g.devices.length;
-    return `<div class="kit-chip ${allSelected ? "all-selected" : ""}" data-kit="${escapeHtml(g.kit)}">🧩 ${escapeHtml(g.kit)} · ${selectedCount}/${g.devices.length} out</div>`;
+    return `<div class="kit-chip ${allSelected ? "all-selected" : ""}" data-kit="${escapeHtml(g.kit)}">🧩 ${escapeHtml(g.kit)} · ${selectedCount}/${g.devices.length} out${kitTooltipHtml(g.devices)}</div>`;
   }).join("");
   wrap.querySelectorAll(".kit-chip").forEach(chip => {
     chip.addEventListener("click", () => {
