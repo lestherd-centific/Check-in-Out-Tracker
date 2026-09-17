@@ -52,6 +52,11 @@
   .device-item.selected .check{visibility:visible;}
   .empty-hint{padding:14px;color:var(--sub);font-size:12.5px;text-align:center;}
 
+  .kit-chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;}
+  .kit-chip{display:inline-flex;align-items:center;gap:4px;padding:6px 12px;border-radius:999px;border:1px solid var(--c-pink);background:var(--c-pink-soft);color:var(--c-pink);font-size:12.5px;font-weight:600;cursor:pointer;}
+  .kit-chip:hover{filter:brightness(0.97);}
+  .kit-chip.all-selected{background:var(--c-pink);color:#fff;}
+
   .selected-header{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;}
   .selected-header .count{font-size:12px;color:var(--sub);font-weight:600;}
   .selected-list{margin-top:6px;display:flex;flex-direction:column;gap:6px;}
@@ -152,6 +157,7 @@
       <h3>2. Device</h3>
       <div class="sync-status" style="margin:-4px 0 8px;">Tap a device to select it, then set its condition and add a note if needed.</div>
       <input type="text" id="co-device-search" placeholder="Search asset tag, model, or serial…">
+      <div class="kit-chip-row" id="co-kit-chips"></div>
       <div class="device-list" id="co-device-list"></div>
       <div id="co-selected-wrap"></div>
     </div>
@@ -168,6 +174,7 @@
   <div class="panel" id="panel-checkin">
     <div class="card">
       <input type="text" id="ci-search" placeholder="Search what's currently checked out… (tap items to select one or more)">
+      <div class="kit-chip-row" id="ci-kit-chips"></div>
     </div>
     <div id="ci-list"></div>
 
@@ -427,7 +434,8 @@ async function loadMainTrackerData(){
     liveDevices = (data.devices || []).map(d => ({
       id: String(d.id || ""), tag: String(d.tag || "—"), model: String(d.model || ""),
       serial: String(d.serial || "—"), status: String(d.status || "instock"),
-      bucket: String(d.bucket || MASTER), location: String(d.location || "")
+      bucket: String(d.bucket || MASTER), location: String(d.location || ""),
+      kit: String(d.kit || "")
     }));
     const archivedNames = new Set((data.projects || []).filter(p => String(p.archived).toLowerCase() === "true").map(p => String(p.name)));
     // Master Inventory is the admin-only holding pool, not a field project —
@@ -482,6 +490,21 @@ function availableDevicesFor(project, location){
     d.location === location &&
     !outIds.has(d.id)
   );
+}
+
+// Groups a list of devices by their "kit" field (devices that are always
+// bundled together, e.g. a camera + mic + mmchip). Only kits with 2+ devices
+// present in the given list are returned — a "kit" of one device isn't worth
+// a shortcut. Used to offer a one-tap "select the whole kit" chip instead of
+// making a mod tap each bundled device individually.
+function kitGroups(devices){
+  const byKit = {};
+  devices.forEach(d => {
+    if (!d.kit) return;
+    if (!byKit[d.kit]) byKit[d.kit] = [];
+    byKit[d.kit].push(d);
+  });
+  return Object.keys(byKit).sort().filter(k => byKit[k].length >= 2).map(k => ({ kit: k, devices: byKit[k] }));
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +564,39 @@ document.getElementById("co-location").addEventListener("change", () => {
 });
 document.getElementById("co-device-search").addEventListener("input", renderDeviceList);
 
+// One-tap shortcut for bundled devices (e.g. a camera + mic + mmchip that
+// always travel together as "Kit 1") — tapping the chip selects every
+// available device sharing that kit value, instead of tapping each one.
+// Tapping again deselects the whole kit. Individual devices remain fully
+// independently selectable/removable below regardless of how they were
+// added — a kit is just a selection shortcut, not a merged item.
+function renderCoKitChips(allAvailable){
+  const wrap = document.getElementById("co-kit-chips");
+  const groups = kitGroups(allAvailable);
+  if (groups.length === 0){ wrap.innerHTML = ""; return; }
+  wrap.innerHTML = groups.map(g => {
+    const selectedCount = g.devices.filter(d => coSelectedDevices.has(d.id)).length;
+    const allSelected = selectedCount === g.devices.length;
+    return `<div class="kit-chip ${allSelected ? "all-selected" : ""}" data-kit="${escapeHtml(g.kit)}">🧩 ${escapeHtml(g.kit)} · ${selectedCount}/${g.devices.length}</div>`;
+  }).join("");
+  wrap.querySelectorAll(".kit-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const kit = chip.dataset.kit;
+      const group = groups.find(g => g.kit === kit);
+      if (!group) return;
+      const allSelected = group.devices.every(d => coSelectedDevices.has(d.id));
+      if (allSelected){
+        group.devices.forEach(d => coSelectedDevices.delete(d.id));
+      } else {
+        group.devices.forEach(d => {
+          if (!coSelectedDevices.has(d.id)) coSelectedDevices.set(d.id, { device: d, condition: "Good", notes: "", notesOpen: false });
+        });
+      }
+      renderDeviceList();
+    });
+  });
+}
+
 function renderDeviceList(){
   const project = document.getElementById("co-project").value;
   const location = document.getElementById("co-location").value;
@@ -549,13 +605,16 @@ function renderDeviceList(){
   if (!project || !location){
     deviceCard.style.display = "none";
     detailsCard.style.display = "none";
+    document.getElementById("co-kit-chips").innerHTML = "";
     return;
   }
   deviceCard.style.display = "";
   const q = document.getElementById("co-device-search").value.trim().toLowerCase();
-  const devices = availableDevicesFor(project, location).filter(d =>
+  const allAvailable = availableDevicesFor(project, location);
+  const devices = allAvailable.filter(d =>
     !q || [d.tag, d.model, d.serial].join(" ").toLowerCase().includes(q)
   );
+  renderCoKitChips(allAvailable);
   const listEl = document.getElementById("co-device-list");
   if (devices.length === 0){
     listEl.innerHTML = '<div class="empty-hint">No available devices match this project, location, and search.</div>';
@@ -746,6 +805,51 @@ document.getElementById("ci-search").addEventListener("input", renderCheckinList
 // one shared value applied to the whole batch.
 let ciSelected = new Map();
 
+// Attaches each open checkout's kit value (looked up from the live device
+// list by deviceId) so kitGroups() can bucket them the same way it does for
+// the Check Out tab's plain device objects.
+function ciOpenWithKit(open){
+  return open.map(c => {
+    const dev = liveDevices.find(ld => ld.id === c.deviceId);
+    return Object.assign({}, c, { kit: dev ? dev.kit : "" });
+  });
+}
+
+// Mirrors renderCoKitChips for the Check In side: one tap selects/deselects
+// every currently-open checkout that belongs to the same kit, regardless of
+// who checked each piece out or when — the goal is just to gather all the
+// checkoutIds for a bundle's physical devices in one tap. Computed from every
+// open checkout (not the search-filtered list) so the shortcut stays put
+// while someone's searching for something else.
+function renderCiKitChips(){
+  const wrap = document.getElementById("ci-kit-chips");
+  const withKit = ciOpenWithKit(openCheckouts());
+  const groups = kitGroups(withKit);
+  if (groups.length === 0){ wrap.innerHTML = ""; return; }
+  wrap.innerHTML = groups.map(g => {
+    const selectedCount = g.devices.filter(c => ciSelected.has(c.checkoutId)).length;
+    const allSelected = selectedCount === g.devices.length;
+    return `<div class="kit-chip ${allSelected ? "all-selected" : ""}" data-kit="${escapeHtml(g.kit)}">🧩 ${escapeHtml(g.kit)} · ${selectedCount}/${g.devices.length} out</div>`;
+  }).join("");
+  wrap.querySelectorAll(".kit-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      if (!authInfo){ showAuthGate(); return; }
+      const kit = chip.dataset.kit;
+      const group = groups.find(g => g.kit === kit);
+      if (!group) return;
+      const allSelected = group.devices.every(c => ciSelected.has(c.checkoutId));
+      if (allSelected){
+        group.devices.forEach(c => ciSelected.delete(c.checkoutId));
+      } else {
+        group.devices.forEach(c => {
+          if (!ciSelected.has(c.checkoutId)) ciSelected.set(c.checkoutId, { event: c, condition: "Good", notes: "", notesOpen: false });
+        });
+      }
+      renderCheckinList();
+    });
+  });
+}
+
 function renderCheckinList(){
   const q = document.getElementById("ci-search").value.trim().toLowerCase();
   const open = openCheckouts().filter(c =>
@@ -754,6 +858,7 @@ function renderCheckinList(){
   // Drop selections for anything that's no longer open (e.g. checked in from another tab/session).
   const openIds = new Set(openCheckouts().map(c => c.checkoutId));
   [...ciSelected.keys()].forEach(id => { if (!openIds.has(id)) ciSelected.delete(id); });
+  renderCiKitChips();
 
   const listEl = document.getElementById("ci-list");
   if (open.length === 0){
