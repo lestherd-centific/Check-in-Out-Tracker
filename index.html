@@ -120,6 +120,50 @@
   #progressModalBackdrop{z-index:60;}
   .progress-track{width:100%;height:8px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:12px;}
   .progress-fill{height:100%;width:0%;background:var(--c-violet);border-radius:999px;transition:width .25s ease;}
+
+  /* --- Pre-checkout checklist ------------------------------------------- */
+  /* Sits above the auth gate (50) but below the progress/result modals
+     (60/70), since those belong to an action already in flight. */
+  #onbBackdrop{z-index:65;}
+  .onb-modal{background:var(--panel);color:var(--ink);border-radius:14px;padding:22px 24px 20px;width:560px;max-width:92vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(28,27,41,.22);}
+  .onb-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+  .onb-eyebrow{font-size:11px;font-weight:700;letter-spacing:.09em;color:var(--c-violet);text-transform:uppercase;margin-bottom:5px;}
+  .onb-title{font-size:23px;font-weight:700;margin:0;line-height:1.2;letter-spacing:-.01em;}
+  .onb-close{border:none;background:none;font-size:20px;line-height:1;color:var(--sub);cursor:pointer;padding:2px 6px;border-radius:6px;}
+  .onb-close:hover{background:var(--hover-bg);color:var(--ink);}
+
+  /* Progress rail: a pill track with the completed portion filled by a
+     violet gradient, numbered nodes sitting on it, labels beneath. */
+  .onb-rail{position:relative;margin:20px 0 4px;}
+  .onb-track{position:absolute;left:0;right:0;top:0;height:38px;border-radius:999px;background:var(--c-violet-soft);overflow:hidden;}
+  .onb-track-fill{height:100%;width:0%;border-radius:999px;background:linear-gradient(90deg,#4c1d95 0%,var(--c-violet) 55%,#a78bfa 100%);transition:width .3s ease;}
+  .onb-nodes{position:relative;display:flex;justify-content:space-between;padding:0 6px;}
+  .onb-node{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;background:none;border:none;padding:0;font-family:inherit;cursor:default;}
+  .onb-node.clickable{cursor:pointer;}
+  .onb-dot{width:30px;height:30px;margin-top:4px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:12.5px;font-weight:700;background:var(--panel);color:var(--sub);border:1px solid var(--border);transition:background .2s ease,color .2s ease;}
+  .onb-node.done .onb-dot{background:var(--panel);color:var(--c-violet);border-color:var(--panel);}
+  .onb-node.current .onb-dot{background:var(--panel);color:var(--c-violet);border-color:var(--panel);box-shadow:0 0 0 3px rgba(109,40,217,.25);}
+  .onb-label{font-size:11.5px;font-weight:600;color:var(--sub);white-space:nowrap;}
+  .onb-node.current .onb-label{color:var(--c-violet);}
+
+  .onb-body{margin-top:18px;overflow-y:auto;flex:1;}
+  .onb-step-title{font-size:16px;font-weight:700;margin:0 0 4px;}
+  .onb-blurb{font-size:12.5px;color:var(--sub);line-height:1.55;margin-bottom:12px;}
+  .onb-check{display:flex;align-items:flex-start;gap:10px;padding:11px 13px;border:1px solid var(--border);border-radius:9px;margin-bottom:8px;cursor:pointer;font-size:13.5px;line-height:1.45;}
+  .onb-check:hover{background:var(--hover-bg);}
+  .onb-check.checked{background:var(--c-violet-soft);border-color:var(--c-violet);}
+  .onb-box{flex-shrink:0;width:19px;height:19px;border-radius:5px;border:1.5px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;margin-top:1px;}
+  .onb-check.checked .onb-box{background:var(--c-violet);border-color:var(--c-violet);}
+  .onb-required{font-size:12px;color:var(--sub);margin:0 0 6px;font-weight:600;}
+
+  .onb-tip{display:flex;align-items:flex-start;gap:7px;font-size:12px;color:var(--c-pink);background:var(--c-pink-soft);border-radius:8px;padding:9px 11px;margin-top:14px;line-height:1.5;}
+  .onb-foot{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);}
+  .onb-count{font-size:12px;color:var(--sub);font-weight:600;}
+  .onb-foot-btns{display:flex;gap:8px;}
+
+  .help-btn{width:28px;height:28px;padding:0;border-radius:50%;font-size:14px;font-weight:700;color:var(--c-violet);display:none;align-items:center;justify-content:center;flex-shrink:0;}
+  .help-btn.visible{display:flex;}
+  .header-right{display:flex;align-items:center;gap:12px;}
 </style>
 </head>
 <body>
@@ -130,7 +174,10 @@
     <h1>Hardware Check-In/Out</h1>
     <div class="sync-status" id="syncStatus"></div>
   </div>
-  <div id="authStatus"></div>
+  <div class="header-right">
+    <div id="authStatus"></div>
+    <button id="helpBtn" class="help-btn" title="View the check-out checklist again">?</button>
+  </div>
 </header>
 
 <main>
@@ -232,6 +279,34 @@
     <h3 id="progressModalTitle">Working…</h3>
     <div class="progress-track"><div class="progress-fill" id="progressModalFill"></div></div>
     <div class="sync-status" id="progressModalText" style="margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- Pre-checkout checklist. Shown once per browser session after sign-in, and
+     on demand from the "?" in the header. Markup is built by renderOnboarding()
+     from the ONBOARD_STEPS array — nothing here is hand-authored per step. -->
+<div class="modal-backdrop" id="onbBackdrop">
+  <div class="onb-modal">
+    <div class="onb-head">
+      <div>
+        <div class="onb-eyebrow">Before you check out</div>
+        <h2 class="onb-title" id="onbTitle">Run through the rig check</h2>
+      </div>
+      <button class="onb-close" id="onbClose" title="Close">&times;</button>
+    </div>
+    <div class="onb-rail">
+      <div class="onb-track"><div class="onb-track-fill" id="onbTrackFill"></div></div>
+      <div class="onb-nodes" id="onbNodes"></div>
+    </div>
+    <div class="onb-body" id="onbBody"></div>
+    <div class="onb-tip" id="onbTip"></div>
+    <div class="onb-foot">
+      <span class="onb-count" id="onbCount"></span>
+      <div class="onb-foot-btns">
+        <button id="onbBack">Back</button>
+        <button class="primary" id="onbNext">Next</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -339,6 +414,8 @@ function hideAuthGate(){ document.getElementById("authGateBackdrop").classList.r
 
 function renderAuthStatus(){
   const el = document.getElementById("authStatus");
+  // The "?" only means anything once someone's signed in.
+  document.getElementById("helpBtn").classList.toggle("visible", !!authInfo);
   if (authInfo){
     el.innerHTML = `Signed in as <b>${authInfo.name || authInfo.login}</b> · <button id="logout-btn" class="link-btn">Sign out</button>`;
     document.getElementById("logout-btn").addEventListener("click", () => {
@@ -365,6 +442,7 @@ function attemptLogin(){
   hideAuthGate();
   renderAuthStatus();
   renderAll();
+  maybeShowOnboarding();
 }
 document.getElementById("auth-login-submit").addEventListener("click", attemptLogin);
 document.getElementById("auth-login-input").addEventListener("keydown", e => { if (e.key === "Enter") attemptLogin(); });
@@ -386,6 +464,9 @@ function evaluateAuthGate(){
     document.getElementById("auth-login-form").style.display = "";
   }
   if (!authInfo) showAuthGate(); else hideAuthGate();
+  // Covers the remembered-login case: someone reopens the site already signed
+  // in, so attemptLogin() never runs but it's still a fresh session.
+  if (authInfo) maybeShowOnboarding();
 }
 
 // ---------------------------------------------------------------------------
@@ -1130,6 +1211,179 @@ async function postEvent(event){
     return { ok: false, message: "Couldn't reach the server — try again in a moment." };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Pre-checkout checklist
+// ---------------------------------------------------------------------------
+// Appears once per browser session, right after sign-in, and has to be worked
+// through — there's no close button on that pass. Reopening it from the "?" in
+// the header is a different mode: free navigation, closable at any point,
+// because that's someone looking something up rather than starting a shift.
+//
+// Session-scoped on purpose (sessionStorage, not localStorage): closing the
+// browser and coming back counts as a fresh start and shows it again, which is
+// what we want for a per-shift check. A mod who just refreshes mid-shift isn't
+// made to redo it.
+//
+// FILLER CONTENT — the steps below are placeholders taken from the Device
+// Checkout notes so the shape is real and clickable. Nothing here is captured
+// or written to the CheckoutLog; editing this one array is all it takes to
+// change the wording, the number of steps, or the items under each.
+const ONBOARD_KEY = "checkinout-onboarding-v1";
+const ONBOARD_STEPS = [
+  {
+    label: "Rig", title: "Which rig are you taking out?",
+    blurb: "Pick the rig you're checking out today.",
+    field: { id: "onb-rig", label: "Device Rig ID", options: ["Rig 1", "Rig 2", "Rig 3", "Rig 4", "Rig 5"] },
+    items: [],
+    tip: "Not written to the log yet — this is here to settle the shape of the flow."
+  },
+  {
+    label: "Inspect", title: "Look the gear over",
+    blurb: "Damage you find and note now is damage you don't get asked about later.",
+    items: ["All devices checked for visible damage", "Condition notes added for anything found"],
+    tip: "Anything worse than a scuff — flag it as Fair or Damaged on the device row itself."
+  },
+  {
+    label: "Camera", title: "Insta360 check",
+    blurb: "Two things worth catching before you're on site.",
+    items: ["Lenses are free of scratches and dust", "Memory card is empty and formatted"],
+    tip: "Format on the camera, not on a laptop — it writes the folder structure the camera expects."
+  },
+  {
+    label: "Power", title: "Power and capture settings",
+    blurb: "The settings that quietly ruin a shoot if they're wrong.",
+    items: ["Camera and external battery at 80% or above", "Auto power off set to Never", "360 mode, 8K, 30 FPS"],
+    tip: "Auto power off defaults back on after some firmware updates — worth re-checking."
+  },
+  {
+    label: "Audio", title: "Microphone", blurb: "Last one.",
+    items: ["Gain set to +24 dB, verified in the miniDSP utility"],
+    tip: "Gain is per-device, so a swapped mic needs checking again."
+  }
+];
+
+let onbIndex = 0;
+let onbState = ONBOARD_STEPS.map(s => ({ checks: (s.items || []).map(() => false), value: "" }));
+let onbMode = "required"; // "required" on the once-per-session pass, "review" from the "?"
+
+function onbSeenThisSession(){
+  try { return sessionStorage.getItem(ONBOARD_KEY) === "1"; }
+  catch (err){ return false; } // storage blocked — better to show it again than never
+}
+function onbMarkSeen(){
+  try { sessionStorage.setItem(ONBOARD_KEY, "1"); } catch (err){ /* non-fatal */ }
+}
+
+// A step is satisfied when its dropdown (if any) has a value and every one of
+// its items is ticked. In review mode nothing is gated.
+function onbStepComplete(i){
+  const step = ONBOARD_STEPS[i], st = onbState[i];
+  if (step.field && !st.value) return false;
+  return st.checks.every(Boolean);
+}
+
+function openOnboarding(mode){
+  onbMode = mode || "required";
+  onbIndex = 0;
+  document.getElementById("onbBackdrop").classList.add("open");
+  renderOnboarding();
+}
+function closeOnboarding(){
+  document.getElementById("onbBackdrop").classList.remove("open");
+}
+// Only opens on the once-per-session pass; the "?" path calls openOnboarding
+// directly. Safe to call repeatedly — the poll loop does.
+function maybeShowOnboarding(){
+  if (!authInfo || onbSeenThisSession()) return;
+  if (document.getElementById("onbBackdrop").classList.contains("open")) return;
+  openOnboarding("required");
+}
+
+function renderOnboarding(){
+  const step = ONBOARD_STEPS[onbIndex];
+  const st = onbState[onbIndex];
+  const last = onbIndex === ONBOARD_STEPS.length - 1;
+  const review = onbMode === "review";
+
+  document.getElementById("onbTitle").textContent = review ? "Check-out checklist" : "Run through the rig check";
+  document.getElementById("onbClose").style.display = review ? "" : "none";
+
+  // Rail: the fill reaches the centre of the current node. Nodes are equal
+  // flex columns, so node i's centre sits at (i + 0.5)/n of the track. On the
+  // last step, once it's satisfied, the bar runs the whole way for the sake of
+  // finishing on a full rail.
+  const n = ONBOARD_STEPS.length;
+  const pct = (last && onbStepComplete(onbIndex)) ? 100 : ((onbIndex + 0.5) / n) * 100;
+  document.getElementById("onbTrackFill").style.width = pct + "%";
+  document.getElementById("onbNodes").innerHTML = ONBOARD_STEPS.map((s, i) => {
+    const done = onbStepComplete(i) && i < onbIndex;
+    const cls = [i === onbIndex ? "current" : "", done ? "done" : "", review ? "clickable" : ""].filter(Boolean).join(" ");
+    return `<button class="onb-node ${cls}" data-i="${i}" ${review ? "" : "disabled"} style="background:none;">
+      <span class="onb-dot">${done ? "✓" : (i + 1)}</span>
+      <span class="onb-label">${escapeHtml(s.label)}</span>
+    </button>`;
+  }).join("");
+  if (review){
+    document.getElementById("onbNodes").querySelectorAll(".onb-node").forEach(n => {
+      n.addEventListener("click", () => { onbIndex = Number(n.dataset.i); renderOnboarding(); });
+    });
+  }
+
+  const fieldHtml = step.field ? `
+    <div class="onb-required">${escapeHtml(step.field.label)}</div>
+    <select id="${step.field.id}">
+      <option value="">Select a rig…</option>
+      ${step.field.options.map(o => `<option value="${escapeHtml(o)}" ${st.value === o ? "selected" : ""}>${escapeHtml(o)}</option>`).join("")}
+    </select>` : "";
+
+  const itemsHtml = (step.items || []).map((label, i) => `
+    <div class="onb-check ${st.checks[i] ? "checked" : ""}" data-i="${i}">
+      <span class="onb-box">${st.checks[i] ? "✓" : ""}</span>
+      <span>${escapeHtml(label)}</span>
+    </div>`).join("");
+
+  document.getElementById("onbBody").innerHTML = `
+    <h3 class="onb-step-title">${escapeHtml(step.title)}</h3>
+    ${step.blurb ? `<div class="onb-blurb">${escapeHtml(step.blurb)}</div>` : ""}
+    ${fieldHtml}${itemsHtml}`;
+
+  const tipEl = document.getElementById("onbTip");
+  if (step.tip){ tipEl.style.display = ""; tipEl.innerHTML = `<span>✦</span><span>${escapeHtml(step.tip)}</span>`; }
+  else tipEl.style.display = "none";
+
+  document.getElementById("onbBody").querySelectorAll(".onb-check").forEach(el => {
+    el.addEventListener("click", () => {
+      const i = Number(el.dataset.i);
+      st.checks[i] = !st.checks[i];
+      renderOnboarding();
+    });
+  });
+  const sel = step.field ? document.getElementById(step.field.id) : null;
+  if (sel) sel.addEventListener("change", () => { st.value = sel.value; renderOnboarding(); });
+
+  document.getElementById("onbCount").textContent = `Step ${onbIndex + 1} of ${ONBOARD_STEPS.length}`;
+  document.getElementById("onbBack").style.visibility = onbIndex === 0 ? "hidden" : "";
+  const nextBtn = document.getElementById("onbNext");
+  nextBtn.textContent = last ? (review ? "Close" : "Start checking out") : "Next";
+  nextBtn.disabled = !review && !onbStepComplete(onbIndex);
+}
+
+document.getElementById("onbBack").addEventListener("click", () => {
+  if (onbIndex > 0){ onbIndex--; renderOnboarding(); }
+});
+document.getElementById("onbNext").addEventListener("click", () => {
+  if (onbIndex < ONBOARD_STEPS.length - 1){ onbIndex++; renderOnboarding(); return; }
+  onbMarkSeen();
+  closeOnboarding();
+});
+document.getElementById("onbClose").addEventListener("click", () => {
+  if (onbMode === "review") closeOnboarding();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && onbMode === "review") closeOnboarding();
+});
+document.getElementById("helpBtn").addEventListener("click", () => openOnboarding("review"));
 
 // ---------------------------------------------------------------------------
 // Render everything + polling
