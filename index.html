@@ -185,6 +185,28 @@
   .onb-count{font-size:12px;color:var(--sub);font-weight:600;}
   .onb-foot-btns{display:flex;gap:8px;}
 
+  /* --- Device issues ----------------------------------------------------- */
+  #issueBackdrop{z-index:66;}
+  .issue-modal{background:var(--panel);color:var(--ink);border-radius:14px;padding:22px 24px 20px;width:560px;max-width:92vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(28,27,41,.22);}
+  .issue-picked-row{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--c-violet-soft);border-radius:8px;padding:10px 12px;margin-top:8px;}
+  .issue-picked-row .name{font-weight:600;font-size:13px;}
+  .issue-picked-row .meta{color:var(--sub);font-size:11.5px;margin-top:2px;}
+
+  .issue-item{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:13px 15px;margin-bottom:10px;}
+  .issue-item.open{border-left:3px solid var(--cond-damaged);}
+  .issue-item.review{border-left:3px solid var(--cond-fair);}
+  .issue-item.closed{border-left:3px solid var(--cond-good);}
+  .issue-item .top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+  .issue-item .name{font-weight:600;font-size:13.5px;}
+  .issue-item .meta{color:var(--sub);font-size:12px;margin-top:2px;}
+  .issue-item .desc{font-size:13px;line-height:1.5;margin-top:7px;}
+  .issue-item .res{font-size:12.5px;line-height:1.5;margin-top:7px;padding:8px 10px;background:var(--note-bg);border-radius:7px;color:var(--ink);}
+  .issue-item .res b{color:var(--sub);font-size:11px;text-transform:uppercase;letter-spacing:.03em;display:block;margin-bottom:2px;}
+  .pill.st-open{background:var(--cond-damaged-bg);color:var(--cond-damaged);}
+  .pill.st-review{background:var(--cond-fair-bg);color:var(--cond-fair);}
+  .pill.st-closed{background:var(--cond-good-bg);color:var(--cond-good);}
+  .issues-group-head{font-size:12px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 8px;}
+
   .help-btn{width:28px;height:28px;padding:0;border-radius:50%;font-size:14px;font-weight:700;color:var(--c-violet);display:none;align-items:center;justify-content:center;flex-shrink:0;}
   .help-btn.visible{display:flex;}
   .header-right{display:flex;align-items:center;gap:12px;}
@@ -209,6 +231,7 @@
     <button class="tab-btn active" data-tab="checkout">Check Out</button>
     <button class="tab-btn" data-tab="checkin">Check In</button>
     <button class="tab-btn" data-tab="activity">Recent Activity</button>
+    <button class="tab-btn" data-tab="issues">Device Issues</button>
   </div>
 
   <!-- CHECK OUT -->
@@ -279,12 +302,92 @@
     </div>
   </div>
 
+  <!-- DEVICE ISSUES -->
+  <div class="panel" id="panel-issues">
+    <div class="card">
+      <h3>Reported issues</h3>
+      <div class="sync-status" style="margin:-4px 0 10px;">
+        Everyone sees every report, so nobody puts a device back in rotation before it's been cleared.
+        Status is set by the Hardware Tracking Owner and the Field Equipment Audit Lead.
+      </div>
+      <button class="primary" id="issue-open-btn">Report a device issue</button>
+    </div>
+    <div id="issues-list"></div>
+  </div>
+
   <footer class="note">
     This site only reads devices, projects, and locations from the main Hardware Tracker — it never writes back
     to that workbook. Every check-out and check-in is logged as its own row in a separate Check-In/Out workbook,
     so entries from every moderator merge safely without overwriting anyone else's.
+    <div style="margin-top:8px;">
+      Found something wrong with a device?
+      <button class="link-btn" id="issue-footer-link">Report a device issue</button>
+    </div>
   </footer>
 </main>
+
+<!-- Report a device issue. Reachable from the footer on every tab and from the
+     Device Issues tab; also opened prefilled when a check-in marks something
+     Damaged. -->
+<div class="modal-backdrop" id="issueBackdrop">
+  <div class="issue-modal">
+    <div class="onb-head">
+      <div>
+        <div class="onb-eyebrow">Escalation</div>
+        <h2 class="onb-title">Report a device issue</h2>
+      </div>
+      <button class="onb-close" id="issue-close" title="Close">&times;</button>
+    </div>
+
+    <div class="onb-body" id="issue-body">
+      <label>Which device?</label>
+      <input type="text" id="issue-device-search" placeholder="Search asset tag, model, or serial…" autocomplete="off">
+      <div class="device-list" id="issue-device-list" style="max-height:170px;"></div>
+
+      <div id="issue-picked" style="display:none;"></div>
+
+      <div id="issue-manual" style="display:none;">
+        <div class="row2">
+          <div>
+            <label>What is it?</label>
+            <input type="text" id="issue-manual-type" placeholder="e.g. Radar cage, hub, power bank">
+          </div>
+          <div>
+            <label>Serial or identifier <span style="font-weight:400;">(optional)</span></label>
+            <input type="text" id="issue-manual-serial" placeholder="If it has one">
+          </div>
+        </div>
+        <label>Project</label>
+        <select id="issue-manual-project"></select>
+      </div>
+
+      <label>What's wrong?</label>
+      <textarea id="issue-description" placeholder="Be specific — e.g. &quot;hairline crack on the radar cage, top-left corner&quot;"></textarea>
+
+      <label>When was it noticed?</label>
+      <select id="issue-context">
+        <option value="During check-in">During check-in</option>
+        <option value="During check-out">During check-out</option>
+        <option value="Mid-session">Mid-session</option>
+        <option value="Other">Other</option>
+      </select>
+
+      <div class="onb-tip" style="margin-top:14px;">
+        <span>✦</span>
+        <span>A reported device is held out of check-out until the Audit Lead marks it Resolved or Replaced.</span>
+      </div>
+      <div id="issue-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:8px;min-height:14px;"></div>
+    </div>
+
+    <div class="onb-foot">
+      <span class="onb-count" id="issue-foot-note"></span>
+      <div class="onb-foot-btns">
+        <button id="issue-cancel">Cancel</button>
+        <button class="primary" id="issue-submit">Submit report</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <div class="modal-backdrop" id="resultModalBackdrop">
   <div class="modal">
@@ -358,6 +461,15 @@
 const MAIN_TRACKER_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/d685d4ce87b14c37897baef1d30041eb/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=tqZieZYCMgpC5imEh0w2ObioFk9tXOiTHPB-3nYmGk0";
 const LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/4838ed8350324c4ca02fb04ec2d9ef23/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=jDGVC0LF1iAcwrt1jyHjnrmytF1MI82ddmxTeUEmE5Y";
 const LOG_EVENT_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/workflows/59ef40a39a504f7c970fc016c7e6720c/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=SXiLG0fI-BXn4k4bpBbQrD_Nlgw64RGn9sys5bMVqvM";
+
+// Device Issue Report — its own workbook on the moderators' SharePoint site,
+// and deliberately its own pair of flows rather than extra actions on the Load
+// flow above. That flow carries the Credentials list, so a failure there stops
+// anyone signing in; the issue workbook is one moderators can edit directly,
+// which makes it exactly the kind of thing that breaks. Keeping them apart
+// means a problem with the issue log breaks the issue log and nothing else.
+const ISSUES_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/21/workflows/fa2ead94bdb44ea9853d423c18bf3966/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=oaoPbIDKqioi9Z1YaNUi3QnHIUwwLuamrTUOoxSUsrE";
+const ISSUES_LOG_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/26/workflows/18f419c2912d45ec96c4b0953ca44d98/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Km6Bz_3j0i5LDtnLwG_401C98c9mrKFHJiFAfemZPPg";
 
 const AUTH_KEY = "checkinout-auth-v1";
 const STORE_KEY = "checkinout-cache-v1";
@@ -577,9 +689,94 @@ async function loadMainTrackerData(){
   }
 }
 
+// ---------------------------------------------------------------------------
+// Device issues
+// ---------------------------------------------------------------------------
+// Excel's "List rows present in a table" uses the worksheet's column headers
+// verbatim as JSON keys, so these strings have to match the DeviceIssues table
+// exactly — spaces, slashes and all. Rename a header in the workbook and the
+// matching field here quietly comes back empty, with no error anywhere, so the
+// two are kept side by side on purpose.
+const ISSUE_FIELDS = {
+  id: "Report ID",
+  ts: "Date/Time Reported",
+  reportedBy: "Reported By",
+  project: "Project",
+  location: "Location",
+  serial: "Device SN",
+  tag: "Asset Tag",
+  deviceType: "Device Type",
+  description: "Description of Issue",
+  context: "Session/Context",
+  status: "Status",
+  resolutionNotes: "Resolution Notes",
+  deviceRef: "Device Ref"
+};
+
+let deviceIssues = [];
+let issuesReachable = true;
+
+function mapIssueRow(r){
+  const out = {};
+  Object.keys(ISSUE_FIELDS).forEach(k => { out[k] = String(r[ISSUE_FIELDS[k]] ?? "").trim(); });
+  return out;
+}
+
+// Open and In Review hold a device out of service; Resolved and Replaced
+// release it. An unrecognised or blank status is treated as unresolved — if
+// somebody types something odd into the column, erring towards holding the
+// device back is the safer of the two mistakes.
+function issueIsResolved(status){
+  const s = String(status || "").toLowerCase();
+  return s === "resolved" || s === "replaced";
+}
+
+async function loadIssues(){
+  try {
+    const res = await fetch(ISSUES_LOAD_URL, { method: "POST" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    deviceIssues = (data.issues || []).map(mapIssueRow).filter(r => r.id);
+    issuesReachable = true;
+  } catch (err){
+    // Deliberately non-fatal: the issue log failing must not stop anyone
+    // checking equipment in or out.
+    console.error("Device issues load failed:", err);
+    issuesReachable = false;
+  }
+  renderIssues();
+}
+
+async function postIssue(issue){
+  try {
+    const res = await fetch(ISSUES_LOG_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // Thirteen fields, always all of them, in the order the Office Script
+      // expects. status and resolutionNotes are written once and then belong
+      // to the Audit Lead — the site never touches them again.
+      body: JSON.stringify({
+        id: issue.id, ts: issue.ts, reportedBy: issue.reportedBy,
+        project: issue.project, location: issue.location,
+        serial: issue.serial, tag: issue.tag, deviceType: issue.deviceType,
+        description: issue.description, context: issue.context,
+        status: "Open", resolutionNotes: "", deviceRef: issue.deviceRef || ""
+      })
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    // Show it straight away rather than waiting for the next poll.
+    deviceIssues.unshift({ ...issue, status: "Open", resolutionNotes: "" });
+    renderIssues();
+    return { ok: true };
+  } catch (err){
+    console.error("Report issue failed:", err);
+    return { ok: false };
+  }
+}
+
 async function loadAll(){
   setSyncStatus("Syncing…");
-  await Promise.all([loadMainTrackerData(), loadOwnData()]);
+  await Promise.all([loadMainTrackerData(), loadOwnData(), loadIssues()]);
   setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
 }
 
@@ -1103,6 +1300,7 @@ function renderCheckinList(){
         notesInput.addEventListener("input", (e) => {
           const rec = ciSelected.get(checkoutId);
           if (rec) rec.notes = e.target.value;
+          updateCiSubmitEnabled(); // a Damaged item unblocks as soon as a note exists
         });
       }
     });
@@ -1123,14 +1321,28 @@ function renderCheckinDetails(){
   updateCiSubmitEnabled();
 }
 
+// Anything coming back Damaged files an issue report automatically, and that
+// report is only worth having if it says what's wrong — so the note stops
+// being optional the moment Damaged is chosen.
+function ciDamagedMissingNotes(){
+  return [...ciSelected.values()].filter(rec => rec.condition === "Damaged" && !rec.notes.trim());
+}
+
 function updateCiSubmitEnabled(){
   const btn = document.getElementById("ci-submit");
+  const errEl = document.getElementById("ci-error");
   const n = ciSelected.size;
-  btn.disabled = n === 0 || submitting;
+  const missing = ciDamagedMissingNotes();
+  btn.disabled = n === 0 || submitting || missing.length > 0;
   if (submitting){
     btn.textContent = "Checking in…";
   } else {
     btn.textContent = n > 1 ? `Check in ${n} items` : "Check in";
+  }
+  if (errEl && !submitting){
+    errEl.textContent = missing.length
+      ? `Add a note for ${missing.map(r => r.event.tag).join(", ")} — anything marked Damaged needs a description before it can be checked in.`
+      : "";
   }
 }
 
@@ -1146,6 +1358,10 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
   updateSubmitEnabled(); // keep the Check Out button's disabled state in sync too
   showProgressModal("Checking in…");
   const failed = [];
+  // A check-in that succeeded but whose issue report didn't reach the server:
+  // the equipment is recorded as back, but nobody has been told it's damaged,
+  // so it has to be said out loud rather than swallowed.
+  const issueFilingFailures = [];
   for (let i = 0; i < entries.length; i++){
     const [checkoutId, rec] = entries[i];
     const c = rec.event;
@@ -1163,6 +1379,24 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
     // Excel Online with simultaneous Run Script calls.
     const result = await postEvent(submitEvt);
     if (!result.ok) failed.push({ checkoutId, rec, tag: c.tag });
+    // Damaged gear files its own report, so the escalation path starts without
+    // anyone having to remember a second step. Only after the check-in itself
+    // succeeded — a report for an event that never landed would be misleading.
+    if (result.ok && rec.condition === "Damaged"){
+      const dev = liveDevices.find(ld => ld.id === c.deviceId);
+      const filed = await postIssue({
+        id: "iss-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
+        ts: pacificTimestamp(),
+        reportedBy: authInfo.name || authInfo.login,
+        project: c.project, location: c.location,
+        serial: c.serial, tag: c.tag,
+        deviceType: (dev && dev.model) || c.model,
+        description: rec.notes.trim(),
+        context: "During check-in",
+        deviceRef: c.deviceId || ""
+      });
+      if (!filed.ok) issueFilingFailures.push(c.tag);
+    }
     updateProgressModal(`${c.tag} — ${c.model} (${i + 1} of ${entries.length})`, ((i + 1) / entries.length) * 100);
   }
   submitting = false;
@@ -1176,7 +1410,17 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
     ciSelected = new Map(failed.map(f => [f.checkoutId, f.rec]));
   } else {
     const names = entries.map(([, rec]) => `${rec.event.tag} (${rec.event.model})`).join(", ");
-    showResultModal("Checked in", entries.length > 1 ? `Checked in ${entries.length} items: ${names}.` : `Checked in ${names}.`);
+    const damaged = entries.filter(([, rec]) => rec.condition === "Damaged").length;
+    let msg = entries.length > 1 ? `Checked in ${entries.length} items: ${names}.` : `Checked in ${names}.`;
+    if (damaged > 0 && issueFilingFailures.length === 0){
+      msg += damaged > 1
+        ? ` ${damaged} issue reports were filed — those devices are held out of check-out until they're cleared.`
+        : " An issue report was filed — that device is held out of check-out until it's cleared.";
+    }
+    if (issueFilingFailures.length > 0){
+      msg += ` Couldn't file an issue report for ${issueFilingFailures.join(", ")} — please report it from the Device Issues tab.`;
+    }
+    showResultModal("Checked in", msg, issueFilingFailures.length > 0);
     ciSelected.clear();
   }
   setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
@@ -1428,12 +1672,268 @@ document.addEventListener("keydown", (e) => {
 document.getElementById("helpBtn").addEventListener("click", () => openOnboarding("review"));
 
 // ---------------------------------------------------------------------------
+// Report a device issue
+// ---------------------------------------------------------------------------
+// Timestamps written to the issue workbook are pinned to Pacific, because that
+// workbook is read by people in more than one timezone and a bare local clock
+// tells them nothing about when something actually happened. The check-out log
+// still records each browser's own clock — changing that is a separate piece
+// of work, deliberately not bundled in here.
+function pacificTimestamp(d){
+  d = d || new Date();
+  try {
+    const stamp = d.toLocaleString("en-US", {
+      timeZone: "America/Los_Angeles",
+      year: "numeric", month: "numeric", day: "numeric",
+      hour: "numeric", minute: "2-digit", second: "2-digit", hour12: true
+    });
+    const part = new Intl.DateTimeFormat("en-US", { timeZone: "America/Los_Angeles", timeZoneName: "short" })
+      .formatToParts(d).find(p => p.type === "timeZoneName");
+    return stamp + " " + (part ? part.value : "PT");
+  } catch (err){
+    return d.toLocaleString();
+  }
+}
+
+let issueDevice = null;     // the picked device, or null
+let issueManualMode = false; // reporting something that isn't in the tracker
+let issueSubmitting = false;
+
+function openIssueForm(prefill){
+  if (!authInfo){ showAuthGate(); return; }
+  prefill = prefill || {};
+  issueDevice = prefill.device || null;
+  issueManualMode = false;
+  document.getElementById("issue-device-search").value = "";
+  document.getElementById("issue-description").value = prefill.description || "";
+  document.getElementById("issue-context").value = prefill.context || "During check-in";
+  document.getElementById("issue-manual-type").value = "";
+  document.getElementById("issue-manual-serial").value = "";
+  document.getElementById("issue-error").textContent = "";
+  renderIssueManualProjects();
+  renderIssueDevicePicker();
+  document.getElementById("issueBackdrop").classList.add("open");
+}
+function closeIssueForm(){
+  document.getElementById("issueBackdrop").classList.remove("open");
+}
+
+function renderIssueManualProjects(){
+  const sel = document.getElementById("issue-manual-project");
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Select a project…</option>' +
+    liveProjects.map(p => `<option value="${escapeHtml(p)}">${escapeHtml(p)}</option>`).join("");
+  if (liveProjects.includes(current)) sel.value = current;
+}
+
+// The picker searches the whole fleet, not just what's available in one
+// project — a fault can be found on anything, including something currently
+// checked out by someone else.
+function renderIssueDevicePicker(){
+  const searchEl = document.getElementById("issue-device-search");
+  const listEl = document.getElementById("issue-device-list");
+  const pickedEl = document.getElementById("issue-picked");
+  const manualEl = document.getElementById("issue-manual");
+
+  if (issueDevice || issueManualMode){
+    searchEl.style.display = "none";
+    listEl.style.display = "none";
+  } else {
+    searchEl.style.display = "";
+    listEl.style.display = "";
+  }
+
+  if (issueDevice){
+    pickedEl.style.display = "";
+    pickedEl.innerHTML = `
+      <div class="issue-picked-row">
+        <div>
+          <div class="name">${escapeHtml(issueDevice.tag)} — ${escapeHtml(issueDevice.model)}</div>
+          <div class="meta">Serial ${escapeHtml(issueDevice.serial)} · ${escapeHtml(issueDevice.bucket)} / ${escapeHtml(issueDevice.location)}</div>
+        </div>
+        <button class="link-btn" id="issue-clear-device">Change</button>
+      </div>`;
+    document.getElementById("issue-clear-device").addEventListener("click", () => {
+      issueDevice = null; renderIssueDevicePicker();
+    });
+  } else {
+    pickedEl.style.display = "none";
+    pickedEl.innerHTML = "";
+  }
+
+  manualEl.style.display = issueManualMode ? "" : "none";
+  if (issueManualMode && !document.getElementById("issue-manual-back")){
+    const back = document.createElement("button");
+    back.className = "link-btn";
+    back.id = "issue-manual-back";
+    back.textContent = "Pick from the device list instead";
+    back.style.marginTop = "8px";
+    back.addEventListener("click", () => { issueManualMode = false; renderIssueDevicePicker(); });
+    manualEl.appendChild(back);
+  }
+
+  if (issueDevice || issueManualMode) return;
+
+  const q = searchEl.value.trim().toLowerCase();
+  const matches = liveDevices
+    .filter(d => !q || [d.tag, d.model, d.serial].join(" ").toLowerCase().includes(q))
+    .slice(0, 40);
+
+  listEl.innerHTML = matches.map(d => `
+      <div class="device-item" data-id="${escapeHtml(d.id)}">
+        <div>
+          <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
+          <div class="meta">Serial ${escapeHtml(d.serial)} · ${escapeHtml(d.bucket)}</div>
+        </div>
+      </div>`).join("") +
+    `<div class="device-item" data-manual="1">
+       <div><div class="tag">It's not in this list</div>
+       <div class="meta">A radar cage, hub, power bank or anything else the tracker doesn't hold</div></div>
+     </div>`;
+
+  listEl.querySelectorAll(".device-item").forEach(el => {
+    el.addEventListener("click", () => {
+      if (el.dataset.manual){ issueManualMode = true; issueDevice = null; }
+      else issueDevice = liveDevices.find(d => d.id === el.dataset.id) || null;
+      renderIssueDevicePicker();
+    });
+  });
+}
+
+document.getElementById("issue-device-search").addEventListener("input", renderIssueDevicePicker);
+// Clear the validation line as soon as the thing it complained about is fixed,
+// rather than leaving a red message sitting under a form that's now valid.
+["issue-description", "issue-manual-type", "issue-manual-serial"].forEach(id => {
+  document.getElementById(id).addEventListener("input", () => {
+    document.getElementById("issue-error").textContent = "";
+  });
+});
+document.getElementById("issue-manual-project").addEventListener("change", () => {
+  document.getElementById("issue-error").textContent = "";
+});
+document.getElementById("issue-close").addEventListener("click", closeIssueForm);
+document.getElementById("issue-cancel").addEventListener("click", closeIssueForm);
+document.getElementById("issue-open-btn").addEventListener("click", () => openIssueForm());
+document.getElementById("issue-footer-link").addEventListener("click", () => openIssueForm());
+
+// Builds the row from whichever path the reporter took. A device picked from
+// the list carries its identifiers across automatically; a manually described
+// item has no device ref, which is what stops it holding anything back.
+function buildIssueFromForm(){
+  const description = document.getElementById("issue-description").value.trim();
+  const context = document.getElementById("issue-context").value;
+  if (!description) return { error: "Describe what's wrong before submitting." };
+
+  if (issueDevice){
+    return { issue: {
+      id: "iss-" + Date.now().toString() + Math.random().toString(36).slice(2),
+      ts: pacificTimestamp(),
+      reportedBy: authInfo.name || authInfo.login,
+      project: issueDevice.bucket, location: issueDevice.location,
+      serial: issueDevice.serial, tag: issueDevice.tag,
+      deviceType: issueDevice.model,
+      description, context, deviceRef: issueDevice.id
+    } };
+  }
+  if (issueManualMode){
+    const type = document.getElementById("issue-manual-type").value.trim();
+    const project = document.getElementById("issue-manual-project").value;
+    if (!type) return { error: "Say what the item is." };
+    if (!project) return { error: "Pick which project it belongs to." };
+    return { issue: {
+      id: "iss-" + Date.now().toString() + Math.random().toString(36).slice(2),
+      ts: pacificTimestamp(),
+      reportedBy: authInfo.name || authInfo.login,
+      project, location: "",
+      serial: document.getElementById("issue-manual-serial").value.trim(),
+      tag: "", deviceType: type,
+      description, context, deviceRef: ""
+    } };
+  }
+  return { error: "Pick the device this is about." };
+}
+
+document.getElementById("issue-submit").addEventListener("click", async () => {
+  if (issueSubmitting) return;
+  if (!authInfo){ showAuthGate(); return; }
+  const errEl = document.getElementById("issue-error");
+  const built = buildIssueFromForm();
+  if (built.error){ errEl.textContent = built.error; return; }
+
+  issueSubmitting = true;
+  const btn = document.getElementById("issue-submit");
+  btn.disabled = true; btn.textContent = "Submitting…";
+  const result = await postIssue(built.issue);
+  issueSubmitting = false;
+  btn.disabled = false; btn.textContent = "Submit report";
+
+  if (!result.ok){
+    errEl.textContent = "Couldn't reach the server — try again in a moment.";
+    return;
+  }
+  closeIssueForm();
+  showResultModal("Report submitted",
+    "The Hardware Tracking Owner can see it now. This device is held out of check-out until it's marked Resolved or Replaced.");
+});
+
+// ---------------------------------------------------------------------------
+// DEVICE ISSUES panel
+// ---------------------------------------------------------------------------
+function issueStatusClass(status){
+  const s = String(status || "").toLowerCase();
+  if (issueIsResolved(s)) return "closed";
+  return s === "in review" ? "review" : "open";
+}
+
+function renderIssueCard(r){
+  const cls = issueStatusClass(r.status);
+  const who = r.tag ? `${escapeHtml(r.tag)} — ${escapeHtml(r.deviceType)}` : escapeHtml(r.deviceType || "Unnamed item");
+  const where = [r.project, r.location].filter(Boolean).map(escapeHtml).join(" / ");
+  return `
+    <div class="issue-item ${cls}">
+      <div class="top">
+        <div>
+          <div class="name">${who}</div>
+          <div class="meta">${r.serial ? "Serial " + escapeHtml(r.serial) + " · " : ""}${where}</div>
+          <div class="meta">Reported by ${escapeHtml(r.reportedBy)} · ${escapeHtml(r.ts)}${r.context ? " · " + escapeHtml(r.context) : ""}</div>
+        </div>
+        <span class="pill st-${cls}">${escapeHtml(r.status || "Open")}</span>
+      </div>
+      <div class="desc">${escapeHtml(r.description)}</div>
+      ${r.resolutionNotes ? `<div class="res"><b>Resolution</b>${escapeHtml(r.resolutionNotes)}</div>` : ""}
+    </div>`;
+}
+
+function renderIssues(){
+  const listEl = document.getElementById("issues-list");
+  if (!listEl) return;
+  if (!issuesReachable){
+    listEl.innerHTML = '<div class="card"><div class="empty-hint">Couldn\'t reach the device issue log. Reports can\'t be listed right now — everything else still works.</div></div>';
+    return;
+  }
+  const openOnes = deviceIssues.filter(r => !issueIsResolved(r.status));
+  const closedOnes = deviceIssues.filter(r => issueIsResolved(r.status));
+  if (deviceIssues.length === 0){
+    listEl.innerHTML = '<div class="card"><div class="empty-hint">No issues reported.</div></div>';
+    return;
+  }
+  listEl.innerHTML =
+    `<div class="issues-group-head">Needs attention · ${openOnes.length}</div>` +
+    (openOnes.length ? openOnes.map(renderIssueCard).join("")
+                     : '<div class="card"><div class="empty-hint">Nothing outstanding.</div></div>') +
+    (closedOnes.length
+      ? `<div class="issues-group-head">Cleared · ${closedOnes.length}</div>` + closedOnes.map(renderIssueCard).join("")
+      : "");
+}
+
+// ---------------------------------------------------------------------------
 // Render everything + polling
 // ---------------------------------------------------------------------------
 function renderAll(){
   renderDeviceList();
   renderCheckinList();
   renderActivity();
+  renderIssues();
 }
 
 function escapeHtml(s){
