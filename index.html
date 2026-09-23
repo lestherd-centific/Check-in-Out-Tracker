@@ -207,6 +207,20 @@
   .pill.st-closed{background:var(--cond-good-bg);color:var(--cond-good);}
   .issues-group-head{font-size:12px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 8px;}
 
+  /* Header entry point. Carries the damage colour rather than the violet
+     primary, so it reads as "something is wrong" rather than as the main
+     action of the page. */
+  .report-btn{font-size:12.5px;font-weight:600;padding:6px 11px;color:var(--cond-damaged);border-color:var(--cond-damaged);background:var(--panel);white-space:nowrap;display:none;}
+  .report-btn.visible{display:inline-block;}
+  .report-btn:hover{background:var(--cond-damaged-bg);}
+
+  /* A device held out of service: visible, legible, and not selectable. Hiding
+     it outright would leave a mod holding the physical camera with no idea why
+     the app won't offer it. */
+  .device-item.blocked{opacity:.62;cursor:not-allowed;background:var(--note-bg);}
+  .device-item.blocked:hover{background:var(--note-bg);}
+  .blocked-note{font-size:11.5px;color:var(--cond-damaged);font-weight:600;margin-top:3px;}
+
   .help-btn{width:28px;height:28px;padding:0;border-radius:50%;font-size:14px;font-weight:700;color:var(--c-violet);display:none;align-items:center;justify-content:center;flex-shrink:0;}
   .help-btn.visible{display:flex;}
   .header-right{display:flex;align-items:center;gap:12px;}
@@ -222,6 +236,7 @@
   </div>
   <div class="header-right">
     <div id="authStatus"></div>
+    <button id="issue-header-btn" class="report-btn">⚠ Report a device issue</button>
     <button id="helpBtn" class="help-btn" title="View the check-out checklist again">?</button>
   </div>
 </header>
@@ -319,10 +334,6 @@
     This site only reads devices, projects, and locations from the main Hardware Tracker — it never writes back
     to that workbook. Every check-out and check-in is logged as its own row in a separate Check-In/Out workbook,
     so entries from every moderator merge safely without overwriting anyone else's.
-    <div style="margin-top:8px;">
-      Found something wrong with a device?
-      <button class="link-btn" id="issue-footer-link">Report a device issue</button>
-    </div>
   </footer>
 </main>
 
@@ -552,6 +563,7 @@ function renderAuthStatus(){
   const el = document.getElementById("authStatus");
   // The "?" only means anything once someone's signed in.
   document.getElementById("helpBtn").classList.toggle("visible", !!authInfo);
+  document.getElementById("issue-header-btn").classList.toggle("visible", !!authInfo);
   if (authInfo){
     el.innerHTML = `Signed in as <b>${authInfo.name || authInfo.login}</b> · <button id="logout-btn" class="link-btn">Sign out</button>`;
     document.getElementById("logout-btn").addEventListener("click", () => {
@@ -800,6 +812,32 @@ function openCheckouts(){
 }
 function openDeviceIds(){ return new Set(openCheckouts().map(c => c.deviceId).filter(Boolean)); }
 
+// deviceRef -> the unresolved report holding that device out of service.
+//
+// Any report that isn't Resolved or Replaced blocks, however old, and a report
+// on something the tracker doesn't hold (blank Device Ref) blocks nothing,
+// because there is no device to withhold. Later rows win, so the note a mod
+// sees is the most recent one — Excel returns rows oldest-first.
+//
+// If the issue log can't be reached, this comes back empty and nothing is
+// blocked. Failing open is deliberate: a flow outage should not be able to
+// stop a shift from taking equipment out.
+function blockedDeviceMap(){
+  const m = new Map();
+  deviceIssues.forEach(r => {
+    if (!r.deviceRef || issueIsResolved(r.status)) return;
+    m.set(r.deviceRef, r);
+  });
+  return m;
+}
+
+function blockedReason(issue){
+  const status = (issue.status || "Open").toLowerCase();
+  return status === "in review"
+    ? "Out of service — reported issue, in review"
+    : "Out of service — issue reported, not yet reviewed";
+}
+
 function availableDevicesFor(project, location){
   const outIds = openDeviceIds();
   // Deliberately NOT filtering on status === "instock" — once a device is
@@ -930,7 +968,11 @@ document.getElementById("co-device-search").addEventListener("input", renderDevi
 // added — a kit is just a selection shortcut, not a merged item.
 function renderCoKitChips(allAvailable){
   const wrap = document.getElementById("co-kit-chips");
-  const groups = kitGroups(allAvailable);
+  // A kit chip is a shortcut for "select all of these", so a device that
+  // can't be selected is left out of the group entirely rather than making
+  // the chip promise something it can't deliver.
+  const blocked = blockedDeviceMap();
+  const groups = kitGroups(allAvailable.filter(d => !blocked.has(d.id)));
   if (groups.length === 0){ wrap.innerHTML = ""; return; }
   wrap.innerHTML = groups.map(g => {
     const selectedCount = g.devices.filter(d => coSelectedDevices.has(d.id)).length;
@@ -976,11 +1018,31 @@ function renderDeviceList(){
     !q || [d.tag, d.model, d.serial].join(" ").toLowerCase().includes(q)
   );
   renderCoKitChips(allAvailable);
+  const blocked = blockedDeviceMap();
+  // A device can pick up a report while it is already selected — someone else
+  // files one, the 20s poll brings it in. Drop it from the selection rather
+  // than letting it ride through to submit.
+  [...coSelectedDevices.keys()].forEach(id => { if (blocked.has(id)) coSelectedDevices.delete(id); });
   const listEl = document.getElementById("co-device-list");
   if (devices.length === 0){
     listEl.innerHTML = '<div class="empty-hint">No available devices match this project, location, and search.</div>';
+
   } else {
     listEl.innerHTML = devices.map(d => {
+      const block = blocked.get(d.id);
+      if (block){
+        return `
+      <div class="device-item blocked" data-id="${escapeHtml(d.id)}" data-blocked="1" style="flex-direction:column;align-items:stretch;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div>
+            <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
+            <div class="meta">Serial ${escapeHtml(d.serial)}</div>
+            <div class="blocked-note">${escapeHtml(blockedReason(block))}</div>
+          </div>
+          <span class="pill st-${issueStatusClass(block.status)}">${escapeHtml(block.status || "Open")}</span>
+        </div>
+      </div>`;
+      }
       const rec = coSelectedDevices.get(d.id);
       const selected = !!rec;
       const condition = rec ? rec.condition : "Good";
@@ -1009,10 +1071,17 @@ function renderDeviceList(){
       </div>`;
     }).join("");
 
+    // Everything that matched is withheld: say so above the rows, rather than
+    // leaving a list nothing can be picked from and no explanation of why.
+    if (devices.every(d => blocked.has(d.id))){
+      listEl.innerHTML = '<div class="empty-hint">Every device here has an open issue report and is held out of service until it\'s cleared.</div>' + listEl.innerHTML;
+    }
+
     listEl.querySelectorAll(".device-item").forEach(el => {
       const id = el.dataset.id;
       const d = devices.find(dv => dv.id === id);
       if (!d) return;
+      if (el.dataset.blocked) return; // no handlers at all: nothing to click
 
       el.addEventListener("click", () => {
         if (coSelectedDevices.has(id)) coSelectedDevices.delete(id);
@@ -1814,7 +1883,7 @@ document.getElementById("issue-manual-project").addEventListener("change", () =>
 document.getElementById("issue-close").addEventListener("click", closeIssueForm);
 document.getElementById("issue-cancel").addEventListener("click", closeIssueForm);
 document.getElementById("issue-open-btn").addEventListener("click", () => openIssueForm());
-document.getElementById("issue-footer-link").addEventListener("click", () => openIssueForm());
+document.getElementById("issue-header-btn").addEventListener("click", () => openIssueForm());
 
 // Builds the row from whichever path the reporter took. A device picked from
 // the list carries its identifiers across automatically; a manually described
