@@ -210,6 +210,10 @@
   /* Header entry point. Carries the damage colour rather than the violet
      primary, so it reads as "something is wrong" rather than as the main
      action of the page. */
+  .pair-note{font-size:11.5px;font-weight:600;color:var(--cond-fair);}
+  .pair-name{font-weight:700;}
+  .solo-banner{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--cond-fair);background:var(--cond-fair-bg);border-radius:8px;padding:9px 11px;margin-bottom:12px;line-height:1.5;}
+
   .report-btn{font-size:12.5px;font-weight:600;padding:6px 11px;color:var(--cond-damaged);border-color:var(--cond-damaged);background:var(--panel);white-space:nowrap;display:none;}
   .report-btn.visible{display:inline-block;}
   .report-btn:hover{background:var(--cond-damaged-bg);}
@@ -448,6 +452,21 @@
   </div>
 </div>
 
+<div class="modal-backdrop" id="partnerBackdrop">
+  <div class="modal">
+    <h3>Who are you working with?</h3>
+    <div class="sync-status" style="margin:-8px 0 12px;">Changing this affects everything recorded from now on.
+      Anything already logged keeps the partner it was filed with.</div>
+    <label style="margin-top:0;">Partner</label>
+    <select id="partner-select"><option value="">Working alone</option></select>
+    <div id="partner-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:6px;min-height:16px;"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button id="partner-cancel" style="flex:1;">Cancel</button>
+      <button class="primary" id="partner-save" style="flex:1;">Save</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="authGateBackdrop">
   <div class="modal">
     <h3>Sign in</h3>
@@ -455,6 +474,10 @@
     <div id="auth-login-form" style="display:none;">
       <label style="margin-top:0;">Login</label>
       <input type="text" id="auth-login-input" placeholder="Enter your login" autocomplete="off">
+      <label>Working with <span style="font-weight:400;">(optional)</span></label>
+      <select id="auth-partner-select"><option value="">Working alone</option></select>
+      <div class="sync-status" style="margin-top:5px;">Pick the moderator you're paired with for this shift. Leave it as
+        Working alone if you're on your own — it's allowed, it just gets recorded.</div>
       <div id="auth-login-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:6px;min-height:16px;"></div>
       <div style="margin-top:14px;">
         <button class="primary" id="auth-login-submit" style="width:100%;">Enter</button>
@@ -490,6 +513,24 @@ const MASTER = "Master Inventory";
 // State
 // ---------------------------------------------------------------------------
 let authInfo = JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); // {name, login, role} | null
+
+// The moderator this person is paired with for the shift, as a display name,
+// or "" for working alone. Session-scoped rather than remembered like the
+// login: pairings change shift to shift, so closing the browser should forget
+// it, while a mid-shift refresh should not.
+const PARTNER_KEY = "checkinout-partner-v1";
+let partnerName = (() => {
+  try { return sessionStorage.getItem(PARTNER_KEY) || ""; } catch (err){ return ""; }
+})();
+function setPartner(name){
+  partnerName = String(name || "");
+  try {
+    if (partnerName) sessionStorage.setItem(PARTNER_KEY, partnerName);
+    else sessionStorage.removeItem(PARTNER_KEY);
+  } catch (err){ /* storage blocked — the name still applies for this tab */ }
+  renderAuthStatus();
+  renderDeviceList();
+}
 let credentialsList = [];
 let checkoutLog = JSON.parse(localStorage.getItem(STORE_KEY) || "[]"); // flat array of event rows
 let liveDevices = []; // read-only, from the main tracker
@@ -556,6 +597,20 @@ function findCredential(loginInput){
   if (!q) return null;
   return credentialsList.find(c => c.login.toLowerCase() === q) || null;
 }
+// Everyone on the Credentials list is offered except the person themselves.
+// `exceptLogin` is only known after sign-in; on the sign-in screen nobody is
+// excluded yet, so attemptLogin checks for self-pairing there instead.
+function fillPartnerOptions(selectEl, exceptLogin, current){
+  const names = credentialsList
+    .filter(c => !exceptLogin || c.login.toLowerCase() !== String(exceptLogin).toLowerCase())
+    .map(c => c.name || c.login)
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  selectEl.innerHTML = '<option value="">Working alone</option>' +
+    names.map(n => `<option value="${escapeHtml(n)}">${escapeHtml(n)}</option>`).join("");
+  selectEl.value = names.includes(current) ? current : "";
+}
+
 function showAuthGate(){ document.getElementById("authGateBackdrop").classList.add("open"); }
 function hideAuthGate(){ document.getElementById("authGateBackdrop").classList.remove("open"); }
 
@@ -565,7 +620,14 @@ function renderAuthStatus(){
   document.getElementById("helpBtn").classList.toggle("visible", !!authInfo);
   document.getElementById("issue-header-btn").classList.toggle("visible", !!authInfo);
   if (authInfo){
-    el.innerHTML = `Signed in as <b>${authInfo.name || authInfo.login}</b> · <button id="logout-btn" class="link-btn">Sign out</button>`;
+    // The header is where working-alone is surfaced: always visible, never a
+    // dialog. A warning people have to dismiss is one they learn to dismiss.
+    const pairing = partnerName
+      ? `<span class="pair-name">+ ${escapeHtml(partnerName)}</span>`
+      : `<span class="pair-note">⚠ working alone</span>`;
+    el.innerHTML = `Signed in as <b>${escapeHtml(authInfo.name || authInfo.login)}</b> ${pairing} ` +
+      `· <button id="partner-btn" class="link-btn">Change</button> · <button id="logout-btn" class="link-btn">Sign out</button>`;
+    document.getElementById("partner-btn").addEventListener("click", openPartnerModal);
     document.getElementById("logout-btn").addEventListener("click", () => {
       localStorage.removeItem(AUTH_KEY);
       location.reload();
@@ -575,6 +637,19 @@ function renderAuthStatus(){
   }
 }
 
+function openPartnerModal(){
+  const sel = document.getElementById("partner-select");
+  fillPartnerOptions(sel, authInfo && authInfo.login, partnerName);
+  document.getElementById("partner-error").textContent = "";
+  document.getElementById("partnerBackdrop").classList.add("open");
+}
+function closePartnerModal(){ document.getElementById("partnerBackdrop").classList.remove("open"); }
+document.getElementById("partner-cancel").addEventListener("click", closePartnerModal);
+document.getElementById("partner-save").addEventListener("click", () => {
+  setPartner(document.getElementById("partner-select").value);
+  closePartnerModal();
+});
+
 function attemptLogin(){
   const input = document.getElementById("auth-login-input");
   const errEl = document.getElementById("auth-login-error");
@@ -583,8 +658,16 @@ function attemptLogin(){
     errEl.textContent = "Login not recognized — check with an admin if this seems wrong.";
     return;
   }
+  const chosen = document.getElementById("auth-partner-select").value;
+  // The list can't exclude you until you've said who you are, so the check
+  // happens here rather than being designed out of the dropdown.
+  if (chosen && chosen === (match.name || match.login)){
+    errEl.textContent = "You can't pair with yourself — pick someone else, or leave it as Working alone.";
+    return;
+  }
   authInfo = match;
   localStorage.setItem(AUTH_KEY, JSON.stringify(authInfo));
+  setPartner(chosen);
   errEl.textContent = "";
   input.value = "";
   hideAuthGate();
@@ -610,6 +693,8 @@ function evaluateAuthGate(){
   if (credentialsList.length > 0){
     document.getElementById("auth-login-loading").style.display = "none";
     document.getElementById("auth-login-form").style.display = "";
+    fillPartnerOptions(document.getElementById("auth-partner-select"), null,
+                       document.getElementById("auth-partner-select").value || partnerName);
   }
   if (!authInfo) showAuthGate(); else hideAuthGate();
   // Covers the remembered-login case: someone reopens the site already signed
@@ -634,7 +719,7 @@ function mergeCheckoutLog(remoteRows){
     ts: String(r.ts || ""), modName: String(r.modName || ""), deviceId: String(r.deviceId || ""),
     tag: String(r.tag || ""), model: String(r.model || ""), serial: String(r.serial || ""),
     project: String(r.project || ""), location: String(r.location || ""),
-    destination: String(r.destination || ""),
+    destination: String(r.destination || ""), partner: String(r.partner || ""),
     condition: String(r.condition || ""), notes: String(r.notes || "")
   })).filter(r => r.id);
   const remoteIds = new Set(remote.map(r => r.id));
@@ -722,7 +807,8 @@ const ISSUE_FIELDS = {
   context: "Session/Context",
   status: "Status",
   resolutionNotes: "Resolution Notes",
-  deviceRef: "Device Ref"
+  deviceRef: "Device Ref",
+  partner: "Partner"
 };
 
 let deviceIssues = [];
@@ -772,7 +858,8 @@ async function postIssue(issue){
         project: issue.project, location: issue.location,
         serial: issue.serial, tag: issue.tag, deviceType: issue.deviceType,
         description: issue.description, context: issue.context,
-        status: "Open", resolutionNotes: "", deviceRef: issue.deviceRef || ""
+        status: "Open", resolutionNotes: "", deviceRef: issue.deviceRef || "",
+        partner: issue.partner || ""
       })
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -1012,6 +1099,7 @@ function renderDeviceList(){
   }
   deviceCard.style.display = "";
   destinationCard.style.display = "";
+  renderSoloBanner();
   const q = document.getElementById("co-device-search").value.trim().toLowerCase();
   const allAvailable = availableDevicesFor(project, location);
   const devices = allAvailable.filter(d =>
@@ -1123,6 +1211,27 @@ function renderDeviceList(){
   renderSelectedDevices();
 }
 
+// Shown on the check-out card while nobody is paired. Deliberately a line on
+// the page rather than a confirmation step: solo shifts are legitimate, and a
+// dialog that appears every legitimate time is one people stop reading.
+function renderSoloBanner(){
+  const card = document.getElementById("co-device-card");
+  let el = document.getElementById("solo-banner");
+  if (partnerName){
+    if (el) el.remove();
+    return;
+  }
+  if (!el){
+    el = document.createElement("div");
+    el.id = "solo-banner";
+    el.className = "solo-banner";
+    el.innerHTML = '<span>⚠</span><span>You\'re recorded as working alone. If someone is with you, ' +
+      '<button class="link-btn" id="solo-banner-set">set your partner</button> so the log shows both of you.</span>';
+    card.insertBefore(el, card.firstChild);
+    document.getElementById("solo-banner-set").addEventListener("click", openPartnerModal);
+  }
+}
+
 function renderSelectedDevices(){
   const wrap = document.getElementById("co-selected-wrap");
   const detailsCard = document.getElementById("co-details-card");
@@ -1196,7 +1305,7 @@ document.getElementById("co-submit").addEventListener("click", async () => {
       id: "evt-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
       checkoutId: "co-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
       eventType: "checkout", ts: new Date().toLocaleString(),
-      modName: authInfo.name || authInfo.login,
+      modName: authInfo.name || authInfo.login, partner: partnerName,
       deviceId: d.id, tag: d.tag, model: d.model, serial: d.serial,
       project, location, destination, condition: rec.condition, notes: rec.notes.trim()
     };
@@ -1287,7 +1396,7 @@ function renderCiKitChips(){
 function renderCheckinList(){
   const q = document.getElementById("ci-search").value.trim().toLowerCase();
   const open = openCheckouts().filter(c =>
-    !q || [c.tag, c.model, c.serial, c.project, c.location, c.modName].join(" ").toLowerCase().includes(q)
+    !q || [c.tag, c.model, c.serial, c.project, c.location, c.modName, c.partner].join(" ").toLowerCase().includes(q)
   );
   // Drop selections for anything that's no longer open (e.g. checked in from another tab/session).
   const openIds = new Set(openCheckouts().map(c => c.checkoutId));
@@ -1320,7 +1429,7 @@ function renderCheckinList(){
           <div>
             <div class="name">${escapeHtml(c.tag)} — ${escapeHtml(c.model)}</div>
             <div class="meta">Serial ${escapeHtml(c.serial)} · ${escapeHtml(c.project)} / ${escapeHtml(c.location)}${c.destination ? ` → ${escapeHtml(c.destination)}` : ""}</div>
-            <div class="meta">Checked out by ${escapeHtml(c.modName)} · ${escapeHtml(c.ts)}</div>
+            <div class="meta">Checked out by ${escapeHtml(withPartner(c.modName, c.partner))} · ${escapeHtml(c.ts)}</div>
           </div>
           ${rightControls}
         </div>
@@ -1439,7 +1548,9 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
     const submitEvt = {
       id: "evt-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
       checkoutId, eventType: "checkin", ts: new Date().toLocaleString(),
-      modName: authInfo.name || authInfo.login,
+      // Recorded as of the check-in, which may be a different pairing from the
+      // one the equipment went out with — that is the accurate thing to store.
+      modName: authInfo.name || authInfo.login, partner: partnerName,
       deviceId: c.deviceId, tag: c.tag, model: c.model, serial: c.serial,
       project: c.project, location: c.location, destination: c.destination || "",
       condition: rec.condition, notes: rec.notes.trim()
@@ -1456,7 +1567,7 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
       const filed = await postIssue({
         id: "iss-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
         ts: pacificTimestamp(),
-        reportedBy: authInfo.name || authInfo.login,
+        reportedBy: authInfo.name || authInfo.login, partner: partnerName,
         project: c.project, location: c.location,
         serial: c.serial, tag: c.tag,
         deviceType: (dev && dev.model) || c.model,
@@ -1511,7 +1622,7 @@ function renderActivity(){
   listEl.innerHTML = items.map(e => `
     <div class="activity-item">
       <div><span class="dot ${escapeHtml(e.eventType)}"></span><b>${e.eventType === "checkout" ? "Checked out" : "Checked in"}</b> — ${escapeHtml(e.tag)} (${escapeHtml(e.model)}, ${escapeHtml(e.serial)})</div>
-      <div class="meta">${escapeHtml(e.modName)} · ${escapeHtml(e.project)} / ${escapeHtml(e.location)}${e.destination ? ` → ${escapeHtml(e.destination)}` : ""} · ${escapeHtml(e.ts)} · <span class="pill ${e.condition.toLowerCase()}">${escapeHtml(e.condition)}</span>${e.notes ? " · " + escapeHtml(e.notes) : ""}</div>
+      <div class="meta">${escapeHtml(withPartner(e.modName, e.partner))} · ${escapeHtml(e.project)} / ${escapeHtml(e.location)}${e.destination ? ` → ${escapeHtml(e.destination)}` : ""} · ${escapeHtml(e.ts)} · <span class="pill ${e.condition.toLowerCase()}">${escapeHtml(e.condition)}</span>${e.notes ? " · " + escapeHtml(e.notes) : ""}</div>
     </div>`).join("");
 }
 
@@ -1533,7 +1644,11 @@ async function postEvent(event){
         id: event.id, checkoutId: event.checkoutId, eventType: event.eventType, ts: event.ts,
         modName: event.modName, deviceId: event.deviceId, tag: event.tag, model: event.model, serial: event.serial,
         project: event.project, location: event.location, destination: event.destination || "",
-        condition: event.condition, notes: event.notes
+        condition: event.condition, notes: event.notes,
+        // Both names on the one row. Writing the event twice, once per mod,
+        // would double the log and break the checkoutId pairing that check-in
+        // depends on.
+        partner: event.partner || ""
       })
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -1897,7 +2012,7 @@ function buildIssueFromForm(){
     return { issue: {
       id: "iss-" + Date.now().toString() + Math.random().toString(36).slice(2),
       ts: pacificTimestamp(),
-      reportedBy: authInfo.name || authInfo.login,
+      reportedBy: authInfo.name || authInfo.login, partner: partnerName,
       project: issueDevice.bucket, location: issueDevice.location,
       serial: issueDevice.serial, tag: issueDevice.tag,
       deviceType: issueDevice.model,
@@ -1912,7 +2027,7 @@ function buildIssueFromForm(){
     return { issue: {
       id: "iss-" + Date.now().toString() + Math.random().toString(36).slice(2),
       ts: pacificTimestamp(),
-      reportedBy: authInfo.name || authInfo.login,
+      reportedBy: authInfo.name || authInfo.login, partner: partnerName,
       project, location: "",
       serial: document.getElementById("issue-manual-serial").value.trim(),
       tag: "", deviceType: type,
@@ -1948,6 +2063,11 @@ document.getElementById("issue-submit").addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 // DEVICE ISSUES panel
 // ---------------------------------------------------------------------------
+// "Lesther Dumosmog + Kyle Crowe", or just the one name when solo.
+function withPartner(name, partner){
+  return partner ? `${name} + ${partner}` : name;
+}
+
 function issueStatusClass(status){
   const s = String(status || "").toLowerCase();
   if (issueIsResolved(s)) return "closed";
@@ -1964,7 +2084,7 @@ function renderIssueCard(r){
         <div>
           <div class="name">${who}</div>
           <div class="meta">${r.serial ? "Serial " + escapeHtml(r.serial) + " · " : ""}${where}</div>
-          <div class="meta">Reported by ${escapeHtml(r.reportedBy)} · ${escapeHtml(r.ts)}${r.context ? " · " + escapeHtml(r.context) : ""}</div>
+          <div class="meta">Reported by ${escapeHtml(withPartner(r.reportedBy, r.partner))} · ${escapeHtml(r.ts)}${r.context ? " · " + escapeHtml(r.context) : ""}</div>
         </div>
         <span class="pill st-${cls}">${escapeHtml(r.status || "Open")}</span>
       </div>
