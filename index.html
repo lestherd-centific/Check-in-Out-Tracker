@@ -224,6 +224,11 @@
   .device-item.blocked{opacity:.62;cursor:not-allowed;background:var(--note-bg);}
   .device-item.blocked:hover{background:var(--note-bg);}
   .blocked-note{font-size:11.5px;color:var(--cond-damaged);font-weight:600;margin-top:3px;}
+  /* A device that's simply with somebody else is not a fault — it reads in the
+     muted ink rather than the damage red, so the two states stay distinct at a
+     glance. */
+  .out-note{font-size:11.5px;color:var(--sub);font-weight:600;margin-top:3px;}
+  .pill.out{background:var(--c-violet-soft);color:var(--c-violet);}
 
   .help-btn{width:28px;height:28px;padding:0;border-radius:50%;font-size:14px;font-weight:700;color:var(--c-violet);display:none;align-items:center;justify-content:center;flex-shrink:0;}
   .help-btn.visible{display:flex;}
@@ -961,20 +966,54 @@ function blockedReason(issue){
     : "Out of service — issue reported, not yet reviewed";
 }
 
+// Every device belonging to this project and location, each tagged with why
+// it can't be taken — or null if it can.
+//
+// Devices that are out with somebody used to be filtered away entirely, which
+// meant a moderator searching for a camera that was sitting in a colleague's
+// bag got "no devices match" and no idea why. They're now listed and greyed,
+// the same treatment as a device held out for an issue.
+//
+// Deliberately NOT filtering on status === "instock" — once a device is
+// assigned to a project it's normally marked "inuse" on the main tracker
+// (that's just how deployed gear reads there), so requiring "instock" would
+// make every real project's device list come up empty. Only "broken" gear is
+// excluded outright.
+function devicesFor(project, location){
+  const blocked = blockedDeviceMap();
+  const openByDevice = new Map();
+  openCheckouts().forEach(c => { if (c.deviceId && !openByDevice.has(c.deviceId)) openByDevice.set(c.deviceId, c); });
+
+  return liveDevices
+    .filter(d => d.status !== "broken" && d.bucket === project && d.location === location)
+    .map(d => {
+      const issue = blocked.get(d.id);
+      if (issue) return { device: d, unavailable: { kind: "issue", issue } };
+      const out = openByDevice.get(d.id);
+      if (out) return { device: d, unavailable: { kind: "out", checkout: out } };
+      return { device: d, unavailable: null };
+    });
+}
+
+// Available first, then whatever can't be taken. With half a project's kit out
+// on a busy morning, an interleaved list is mostly rows you can't use.
+function sortByAvailability(entries){
+  return [...entries].sort((a, b) => (a.unavailable ? 1 : 0) - (b.unavailable ? 1 : 0));
+}
+
+// Kept for the callers that only want what's actually selectable.
 function availableDevicesFor(project, location){
-  const outIds = openDeviceIds();
-  // Deliberately NOT filtering on status === "instock" — once a device is
-  // assigned to a project it's normally marked "inuse" on the main tracker
-  // (that's just how deployed gear reads there), so requiring "instock"
-  // would make every real project's device list come up empty. Only
-  // "broken" gear is excluded; whether a specific unit is currently held by
-  // a mod is tracked independently via this site's own open-checkout log.
-  return liveDevices.filter(d =>
-    d.status !== "broken" &&
-    d.bucket === project &&
-    d.location === location &&
-    !outIds.has(d.id)
-  );
+  return devicesFor(project, location).filter(e => !e.unavailable).map(e => e.device);
+}
+
+// "2h" / "3d", matching how long a device has been out.
+function outAgeLabel(checkout){
+  const t = checkout && checkout._addedAt;
+  if (!t) return "";
+  const ms = Date.now() - t;
+  if (ms < 60 * 60 * 1000) return Math.max(1, Math.round(ms / 60000)) + "m";
+  if (ms < 24 * 60 * 60 * 1000) return Math.round(ms / 3600000) + "h";
+  return Math.round(ms / 86400000) + "d";
 }
 
 // Groups a list of devices by their "kit" field (devices that are always
@@ -1137,24 +1176,25 @@ function renderDeviceList(){
   destinationCard.style.display = "";
   renderSoloBanner();
   const q = document.getElementById("co-device-search").value.trim().toLowerCase();
-  const allAvailable = availableDevicesFor(project, location);
-  const devices = allAvailable.filter(d =>
-    !q || [d.tag, d.model, d.serial].join(" ").toLowerCase().includes(q)
-  );
-  renderCoKitChips(allAvailable);
-  const blocked = blockedDeviceMap();
-  // A device can pick up a report while it is already selected — someone else
-  // files one, the 20s poll brings it in. Drop it from the selection rather
-  // than letting it ride through to submit.
-  [...coSelectedDevices.keys()].forEach(id => { if (blocked.has(id)) coSelectedDevices.delete(id); });
+  const allEntries = devicesFor(project, location);
+  const entries = sortByAvailability(allEntries.filter(e =>
+    !q || [e.device.tag, e.device.model, e.device.serial].join(" ").toLowerCase().includes(q)
+  ));
+  renderCoKitChips(allEntries.filter(e => !e.unavailable).map(e => e.device));
+  // A device can become unavailable while it is already selected — someone
+  // else takes it, or files a report against it, and the next poll brings that
+  // in. Drop it from the basket rather than letting it ride through to submit.
+  const unavailableIds = new Set(allEntries.filter(e => e.unavailable).map(e => e.device.id));
+  [...coSelectedDevices.keys()].forEach(id => { if (unavailableIds.has(id)) coSelectedDevices.delete(id); });
   const listEl = document.getElementById("co-device-list");
-  if (devices.length === 0){
-    listEl.innerHTML = '<div class="empty-hint">No available devices match this project, location, and search.</div>';
+  if (entries.length === 0){
+    listEl.innerHTML = '<div class="empty-hint">No devices match this project, location, and search.</div>';
 
   } else {
-    listEl.innerHTML = devices.map(d => {
-      const block = blocked.get(d.id);
-      if (block){
+    listEl.innerHTML = entries.map(entry => {
+      const d = entry.device;
+      if (entry.unavailable && entry.unavailable.kind === "issue"){
+        const block = entry.unavailable.issue;
         return `
       <div class="device-item blocked" data-id="${escapeHtml(d.id)}" data-blocked="1" style="flex-direction:column;align-items:stretch;">
         <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
@@ -1164,6 +1204,22 @@ function renderDeviceList(){
             <div class="blocked-note">${escapeHtml(blockedReason(block))}</div>
           </div>
           <span class="pill st-${issueStatusClass(block.status)}">${escapeHtml(block.status || "Open")}</span>
+        </div>
+      </div>`;
+      }
+      if (entry.unavailable && entry.unavailable.kind === "out"){
+        const c = entry.unavailable.checkout;
+        const holder = withPartner(c.modName || "someone", c.partner);
+        const age = outAgeLabel(c);
+        return `
+      <div class="device-item blocked" data-id="${escapeHtml(d.id)}" data-blocked="1" style="flex-direction:column;align-items:stretch;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div>
+            <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
+            <div class="meta">Serial ${escapeHtml(d.serial)}</div>
+            <div class="out-note">Checked out by ${escapeHtml(holder)}${age ? " · " + escapeHtml(age) : ""}</div>
+          </div>
+          <span class="pill out">Out</span>
         </div>
       </div>`;
       }
@@ -1195,16 +1251,22 @@ function renderDeviceList(){
       </div>`;
     }).join("");
 
-    // Everything that matched is withheld: say so above the rows, rather than
-    // leaving a list nothing can be picked from and no explanation of why.
-    if (devices.every(d => blocked.has(d.id))){
-      listEl.innerHTML = '<div class="empty-hint">Every device here has an open issue report and is held out of service until it\'s cleared.</div>' + listEl.innerHTML;
+    // Everything that matched is unavailable: say so above the rows, rather
+    // than leaving a list nothing can be picked from and no explanation why.
+    if (entries.every(e => e.unavailable)){
+      const anyOut = entries.some(e => e.unavailable.kind === "out");
+      const anyIssue = entries.some(e => e.unavailable.kind === "issue");
+      const why = anyOut && anyIssue ? "is either already checked out or held for an issue report"
+                : anyOut ? "is already checked out by somebody else"
+                : "has an open issue report and is held out of service";
+      listEl.innerHTML = `<div class="empty-hint">Everything here ${why}.</div>` + listEl.innerHTML;
     }
 
     listEl.querySelectorAll(".device-item").forEach(el => {
       const id = el.dataset.id;
-      const d = devices.find(dv => dv.id === id);
-      if (!d) return;
+      const entry = entries.find(e => e.device.id === id);
+      if (!entry) return;
+      const d = entry.device;
       if (el.dataset.blocked) return; // no handlers at all: nothing to click
 
       el.addEventListener("click", () => {
@@ -1324,12 +1386,56 @@ document.getElementById("co-submit").addEventListener("click", async () => {
   const project = document.getElementById("co-project").value;
   const location = document.getElementById("co-location").value;
   const destination = getSelectedDestination();
-  const entries = [...coSelectedDevices.entries()]; // [deviceId, {device, condition, notes}]
   const errEl = document.getElementById("co-error");
   errEl.textContent = "";
 
   submitting = true;
   updateSubmitEnabled();
+
+  // Re-read the log immediately before writing anything.
+  //
+  // Between this browser's last refresh and this tap, another moderator may
+  // have taken one of these devices. Appends never conflict, so without this
+  // check both check-outs succeed: the device then shows as out twice, and
+  // whoever returns it closes only one of the pair — the other stays open
+  // forever and eventually flags as overdue for something sitting on a shelf.
+  //
+  // One extra read per submit, which is cheap next to what the slower polling
+  // saves. It can't close the window completely (there is still a moment
+  // between this check and the write) but it takes the collision from likely
+  // on a busy morning to rare.
+  const intended = [...coSelectedDevices.entries()];
+  showProgressModal("Checking availability…");
+  updateProgressModal("Making sure nobody else has taken these…", 4);
+  await loadOwnData();
+
+  const takenSince = [];
+  const stillFree = new Map();
+  const blockedNow = blockedDeviceMap();
+  const outNow = openDeviceIds();
+  intended.forEach(([id, rec]) => {
+    const taker = outNow.has(id)
+      ? (openCheckouts().find(c => c.deviceId === id) || null)
+      : null;
+    if (taker) takenSince.push({ device: rec.device, taker });
+    else if (blockedNow.has(id)) takenSince.push({ device: rec.device, taker: null });
+    else stillFree.set(id, rec);
+  });
+  coSelectedDevices = stillFree;
+
+  if (takenSince.length > 0 && stillFree.size === 0){
+    submitting = false;
+    hideProgressModal();
+    const first = takenSince[0];
+    showResultModal("Nothing left to check out",
+      takenSince.length === 1 && first.taker
+        ? `${first.device.tag} was just checked out by ${withPartner(first.taker.modName, first.taker.partner)}. Nothing else was selected.`
+        : "Everything you had selected has just been taken or reported by somebody else.", true);
+    renderAll();
+    return;
+  }
+
+  const entries = [...coSelectedDevices.entries()]; // [deviceId, {device, condition, notes}]
   showProgressModal("Checking out…");
   const failed = [];
   for (let i = 0; i < entries.length; i++){
@@ -1363,7 +1469,16 @@ document.getElementById("co-submit").addEventListener("click", async () => {
     coSelectedDevices = new Map(failed.map(f => [f.id, f.rec]));
   } else {
     const names = entries.map(([, rec]) => `${rec.device.tag} (${rec.device.model})`).join(", ");
-    showResultModal("Checked out", entries.length > 1 ? `Checked out ${entries.length} devices: ${names}.` : `Checked out ${names}.`);
+    let msg = entries.length > 1 ? `Checked out ${entries.length} devices: ${names}.` : `Checked out ${names}.`;
+    if (takenSince.length > 0){
+      // Said plainly rather than silently dropped — a moderator who thinks
+      // they have five devices and walks off with four is the failure this
+      // whole check exists to prevent.
+      msg += " " + takenSince.map(t => t.taker
+        ? `${t.device.tag} was just taken by ${withPartner(t.taker.modName, t.taker.partner)}`
+        : `${t.device.tag} has just been reported and is out of service`).join("; ") + " — not included.";
+    }
+    showResultModal("Checked out", msg, takenSince.length > 0);
     coSelectedDevices.clear();
     document.getElementById("co-device-search").value = "";
     document.getElementById("co-destination").value = "";
@@ -2216,7 +2331,28 @@ renderAll();
 // pop it back open once credentials load if that login turns out invalid.
 if (!authInfo) showAuthGate();
 loadAll();
-setInterval(() => { if (document.visibilityState === "visible" && !submitting) loadAll(); }, 20000);
+// Three rhythms rather than one.
+//
+// Every open browser used to refresh all three flows every 20 seconds. Power
+// Platform counts each ACTION inside a flow as a request, not each run, and
+// all of it bills to the flow owner's allocation rather than being spread
+// across moderators — so ten people idling on this page was roughly 420
+// requests a minute, all day, against a daily allowance.
+//
+// What actually changes minute to minute is the check-out log. The device list
+// comes from the main tracker, where equipment is added and moved by admins
+// over days. Issue statuses are set by the Audit Lead, not in a hurry. Those
+// two don't need a 20-second heartbeat, and slowing them cuts the sustained
+// load by roughly 5x with nothing lost that anybody would feel.
+const POLL_LOG_MS = 90 * 1000;        // check-out log: who has what right now
+const POLL_DEVICES_MS = 5 * 60 * 1000; // the fleet, from the main tracker
+const POLL_ISSUES_MS = 5 * 60 * 1000;  // issue statuses, set by hand in Excel
+
+function pollable(){ return document.visibilityState === "visible" && !submitting; }
+
+setInterval(() => { if (pollable()) loadOwnData(); }, POLL_LOG_MS);
+setInterval(() => { if (pollable()) loadMainTrackerData(); }, POLL_DEVICES_MS);
+setInterval(() => { if (pollable()) loadIssues(); }, POLL_ISSUES_MS);
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && !submitting) loadAll();
 });
