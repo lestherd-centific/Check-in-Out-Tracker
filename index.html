@@ -205,6 +205,14 @@
   .pill.st-open{background:var(--cond-damaged-bg);color:var(--cond-damaged);}
   .pill.st-review{background:var(--cond-fair-bg);color:var(--cond-fair);}
   .pill.st-closed{background:var(--cond-good-bg);color:var(--cond-good);}
+  .ci-group-head{font-size:12px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 4px;}
+  .ci-group-head:first-child{margin-top:0;}
+  .ci-group-hint{font-size:11.5px;color:var(--sub);margin-bottom:8px;}
+  /* Your own equipment carries the violet edge the rest of the app uses for
+     "this is yours"; everyone else's stays plain, so the two read apart at a
+     glance without the second group looking disabled. */
+  .open-item.mine{border-left:3px solid var(--c-violet);}
+
   .issues-group-head{font-size:12px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:18px 0 8px;}
 
   /* Header entry point. Carries the damage colour rather than the violet
@@ -1544,6 +1552,23 @@ function renderCiKitChips(){
   });
 }
 
+// Whether an open checkout belongs to the signed-in moderator or their
+// current partner. Either name appearing on the row is enough — a pair's
+// equipment is theirs whichever of the two actually tapped Check out, and a
+// partner who took something earlier in the shift is still the pair's.
+//
+// This only sorts and labels. Anyone can still check in anything: gear gets
+// handed between people constantly and blocking that would only produce
+// inaccurate records.
+function isMyCheckout(c){
+  if (!authInfo) return false;
+  const me = (authInfo.name || authInfo.login || "").toLowerCase();
+  const names = [c.modName, c.partner].map(n => String(n || "").toLowerCase());
+  if (names.includes(me)) return true;
+  const mate = String(partnerName || "").toLowerCase();
+  return !!mate && names.includes(mate);
+}
+
 function renderCheckinList(){
   const q = document.getElementById("ci-search").value.trim().toLowerCase();
   const open = openCheckouts().filter(c =>
@@ -1558,7 +1583,7 @@ function renderCheckinList(){
   if (open.length === 0){
     listEl.innerHTML = '<div class="empty-hint">Nothing is currently checked out.</div>';
   } else {
-    listEl.innerHTML = open.map(c => {
+    const renderRow = c => {
       const rec = ciSelected.get(c.checkoutId);
       const selected = !!rec;
       const condition = rec ? rec.condition : "Good";
@@ -1575,7 +1600,7 @@ function renderCheckinList(){
         ? `<textarea class="ci-notes-input" placeholder="Note for this item…">${escapeHtml(rec.notes)}</textarea>`
         : "";
       return `
-      <div class="open-item ${selected ? "selected" : ""}" data-checkout-id="${escapeHtml(c.checkoutId)}">
+      <div class="open-item ${selected ? "selected" : ""} ${isMyCheckout(c) ? "mine" : ""}" data-checkout-id="${escapeHtml(c.checkoutId)}">
         <div class="top">
           <div>
             <div class="name">${escapeHtml(c.tag)} — ${escapeHtml(c.model)}</div>
@@ -1586,7 +1611,25 @@ function renderCheckinList(){
         </div>
         ${notesBlock}
       </div>`;
-    }).join("");
+    };
+
+    // Yours first, everyone else's below — both fully usable. On a busy day
+    // the list is mostly other people's equipment, and scanning it for your
+    // own three items is the thing this is meant to spare you.
+    const mine = open.filter(isMyCheckout);
+    const theirs = open.filter(c => !isMyCheckout(c));
+    const section = (title, rows, hint) => rows.length
+      ? `<div class="ci-group-head">${title} · ${rows.length}</div>` +
+        (hint ? `<div class="ci-group-hint">${hint}</div>` : "") +
+        rows.map(renderRow).join("")
+      : "";
+
+    listEl.innerHTML =
+      section(partnerName ? "Yours and " + escapeHtml(partnerName) + "\u2019s" : "Yours", mine) +
+      section("Checked out by others", theirs,
+        theirs.length && mine.length === 0
+          ? "You have nothing out at the moment. You can still return any of these."
+          : "You can return these too — just check the condition before you do.");
 
     listEl.querySelectorAll(".open-item").forEach(el => {
       const checkoutId = el.dataset.checkoutId;
