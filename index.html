@@ -538,10 +538,47 @@ let liveProjects = []; // active project names, from the main tracker
 let liveDestinations = []; // admin-maintained list, from this site's own Destinations tab
 let submitting = false;
 
+// Cap on what gets written to localStorage — NOT on what's held in memory.
+// At roughly 300 bytes of JSON per row this stays well inside a browser's
+// ~5MB budget, and the in-memory log is never capped at all.
+const CACHE_MAX_ROWS = 3000;
+
+// Decides which rows go into localStorage.
+//
+// This used to be `checkoutLog.slice(0, 500)` assigned back to checkoutLog
+// itself, which had two problems. First, it truncated the in-memory array, so
+// a storage cap silently corrupted live state instead of just the cache.
+// Second, remote rows arrive oldest-first (Excel table order), so keeping the
+// FIRST 500 kept the oldest events and discarded the newest — once the log
+// passed 500 rows a device that was still checked out dropped off the Check In
+// tab and reappeared as available on the Check Out tab, so it could be checked
+// out twice and whoever held it had no way to return it.
+//
+// Retention is now driven by the data rather than by position: every row
+// belonging to a checkout that hasn't been checked back in is kept however old
+// it is, since losing one of those is exactly what makes an out device look
+// available. Anything just submitted from this browser is kept too. Whatever
+// budget is left over goes to the most recent closed rows, for the Activity
+// tab — those are only history, so they're the safe thing to drop.
+function rowsToPersist(){
+  if (checkoutLog.length <= CACHE_MAX_ROWS) return checkoutLog;
+  const closedIds = new Set(checkoutLog.filter(e => e.eventType === "checkin").map(e => e.checkoutId));
+  const mustKeep = e => e._local || !closedIds.has(e.checkoutId);
+  const kept = checkoutLog.filter(mustKeep);
+  const droppable = checkoutLog.filter(e => !mustKeep(e)); // oldest-first, so newest are at the end
+  const budget = Math.max(0, CACHE_MAX_ROWS - kept.length);
+  return [...kept, ...droppable.slice(Math.max(0, droppable.length - budget))];
+}
+
 function saveLocalCache(){
-  // Cap it so localStorage doesn't grow unbounded on a browser used for months.
-  if (checkoutLog.length > 500) checkoutLog = checkoutLog.slice(0, 500);
-  localStorage.setItem(STORE_KEY, JSON.stringify(checkoutLog));
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(rowsToPersist()));
+  } catch (err){
+    // Quota exceeded, private-browsing restrictions, a cleared profile — the
+    // cache is only a warm-start convenience (the Load flow is the source of
+    // truth), so a failed write must never break a checkout.
+    console.warn("Couldn't write the local cache:", err);
+  }
 }
 
 function setSyncStatus(msg){
@@ -722,6 +759,12 @@ function mergeCheckoutLog(remoteRows){
     destination: String(r.destination || ""), partner: String(r.partner || ""),
     condition: String(r.condition || ""), notes: String(r.notes || "")
   })).filter(r => r.id);
+  // A retried write that turned out to have landed the first time leaves two
+  // identical ids in the table. Collapsing them here keeps the UI honest;
+  // the duplicate row in Excel is a tidy-up job, not a correctness problem.
+  const seen = new Set();
+  const deduped = remote.filter(r => (seen.has(r.id) ? false : (seen.add(r.id), true)));
+  remote.length = 0; remote.push(...deduped);
   const remoteIds = new Set(remote.map(r => r.id));
   const stillPending = checkoutLog.filter(e => e._local && !remoteIds.has(e.id) && (Date.now() - (e._addedAt || 0)) < 2 * 60 * 1000);
   checkoutLog = [...stillPending, ...remote];
@@ -834,7 +877,9 @@ async function loadIssues(){
     const res = await fetch(ISSUES_LOAD_URL, { method: "POST" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
-    deviceIssues = (data.issues || []).map(mapIssueRow).filter(r => r.id);
+    const seenIssueIds = new Set();
+    deviceIssues = (data.issues || []).map(mapIssueRow)
+      .filter(r => r.id && !seenIssueIds.has(r.id) && (seenIssueIds.add(r.id), true));
     issuesReachable = true;
   } catch (err){
     // Deliberately non-fatal: the issue log failing must not stop anyone
@@ -846,31 +891,22 @@ async function loadIssues(){
 }
 
 async function postIssue(issue){
-  try {
-    const res = await fetch(ISSUES_LOG_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      // Thirteen fields, always all of them, in the order the Office Script
-      // expects. status and resolutionNotes are written once and then belong
-      // to the Audit Lead — the site never touches them again.
-      body: JSON.stringify({
-        id: issue.id, ts: issue.ts, reportedBy: issue.reportedBy,
-        project: issue.project, location: issue.location,
-        serial: issue.serial, tag: issue.tag, deviceType: issue.deviceType,
-        description: issue.description, context: issue.context,
-        status: "Open", resolutionNotes: "", deviceRef: issue.deviceRef || "",
-        partner: issue.partner || ""
-      })
-    });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    // Show it straight away rather than waiting for the next poll.
-    deviceIssues.unshift({ ...issue, status: "Open", resolutionNotes: "" });
-    renderIssues();
-    return { ok: true };
-  } catch (err){
-    console.error("Report issue failed:", err);
-    return { ok: false };
-  }
+  // Always all fourteen fields, in the order the Office Script expects.
+  // status and resolutionNotes are written once and then belong to the Audit
+  // Lead — the site never touches them again.
+  const result = await postJsonWithRetry(ISSUES_LOG_URL, {
+    id: issue.id, ts: issue.ts, reportedBy: issue.reportedBy,
+    project: issue.project, location: issue.location,
+    serial: issue.serial, tag: issue.tag, deviceType: issue.deviceType,
+    description: issue.description, context: issue.context,
+    status: "Open", resolutionNotes: "", deviceRef: issue.deviceRef || "",
+    partner: issue.partner || ""
+  }, "Report issue");
+  if (!result.ok) return { ok: false };
+  // Show it straight away rather than waiting for the next poll.
+  deviceIssues.unshift({ ...issue, status: "Open", resolutionNotes: "" });
+  renderIssues();
+  return { ok: true };
 }
 
 async function loadAll(){
@@ -1629,6 +1665,58 @@ function renderActivity(){
 // ---------------------------------------------------------------------------
 // Submitting events (shared by check-out and check-in)
 // ---------------------------------------------------------------------------
+// One POST attempt was too thin for something this consequential. In the
+// morning rush several moderators write to the same two workbooks at once,
+// and a request that never reaches Power Automate — a dropped connection, a
+// sleeping phone radio, a cold start — used to surface straight away as
+// "try again", relying on a tired person to do it.
+//
+// What is and isn't retried matters, because every event carries a unique id
+// and a blind retry of a request that actually succeeded writes the row twice:
+//
+//   - fetch() rejecting means the request never completed — safe to retry.
+//   - 429 and 5xx come from the platform before the flow does its work —
+//     safe to retry.
+//   - any other non-OK response means Power Automate answered deliberately, so
+//     retrying would just repeat a rejection it already made up its mind about.
+//
+// The flow's own Run script action retries 408/429/5xx against Excel already;
+// this covers the leg between the browser and Power Automate, which nothing
+// else was watching.
+const POST_RETRY_DELAYS_MS = [900, 2500];
+
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+async function postJsonWithRetry(url, payload, label){
+  let lastErr = null;
+  for (let attempt = 0; attempt <= POST_RETRY_DELAYS_MS.length; attempt++){
+    if (attempt > 0) await sleep(POST_RETRY_DELAYS_MS[attempt - 1]);
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) return { ok: true };
+      if (res.status === 429 || res.status >= 500){
+        lastErr = new Error("HTTP " + res.status);
+        console.warn(`${label}: HTTP ${res.status}, attempt ${attempt + 1}`);
+        continue; // the platform is busy or broken; worth another go
+      }
+      // A deliberate rejection — a schema mismatch, a bad payload. Retrying
+      // would change nothing and only waste the moderator's time.
+      console.error(`${label}: HTTP ${res.status}, not retrying`);
+      return { ok: false };
+    } catch (err){
+      // Network-level failure: the request did not complete, so no row was
+      // written and a retry cannot duplicate anything.
+      lastErr = err;
+      console.warn(`${label}: network error, attempt ${attempt + 1}`, err);
+    }
+  }
+  console.error(`${label}: giving up after ${POST_RETRY_DELAYS_MS.length + 1} attempts`, lastErr);
+  return { ok: false };
+}
 // Low-level: posts one event, appends it locally on success. No UI-state
 // side effects (no submitting flag, no error text) so it's safe to call in
 // a loop for a multi-device checkout batch as well as a single check-in.
@@ -1636,32 +1724,23 @@ async function postEvent(event){
   if (!LOG_EVENT_URL || LOG_EVENT_URL.indexOf("PASTE_YOUR") === 0){
     return { ok: false, message: "Set LOG_EVENT_URL in index.html once the Log Event flow is built (see SETUP.md)." };
   }
-  try {
-    const res = await fetch(LOG_EVENT_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        id: event.id, checkoutId: event.checkoutId, eventType: event.eventType, ts: event.ts,
-        modName: event.modName, deviceId: event.deviceId, tag: event.tag, model: event.model, serial: event.serial,
-        project: event.project, location: event.location, destination: event.destination || "",
-        condition: event.condition, notes: event.notes,
-        // Both names on the one row. Writing the event twice, once per mod,
-        // would double the log and break the checkoutId pairing that check-in
-        // depends on.
-        partner: event.partner || ""
-      })
-    });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    // Optimistic local append so the UI reflects this immediately, rather
-    // than waiting for the next poll — Excel/Power Automate can take a few
-    // seconds to make a just-written row show up in a "List rows" read.
-    checkoutLog.unshift({ ...event, _local: true, _addedAt: Date.now() });
-    saveLocalCache();
-    return { ok: true };
-  } catch (err){
-    console.error("Log event failed:", err);
-    return { ok: false, message: "Couldn't reach the server — try again in a moment." };
-  }
+  const result = await postJsonWithRetry(LOG_EVENT_URL, {
+    id: event.id, checkoutId: event.checkoutId, eventType: event.eventType, ts: event.ts,
+    modName: event.modName, deviceId: event.deviceId, tag: event.tag, model: event.model, serial: event.serial,
+    project: event.project, location: event.location, destination: event.destination || "",
+    condition: event.condition, notes: event.notes,
+    // Both names on the one row. Writing the event twice, once per mod,
+    // would double the log and break the checkoutId pairing that check-in
+    // depends on.
+    partner: event.partner || ""
+  }, "Log event");
+  if (!result.ok) return { ok: false, message: "Couldn't reach the server — try again in a moment." };
+  // Optimistic local append so the UI reflects this immediately, rather
+  // than waiting for the next poll — Excel/Power Automate can take a few
+  // seconds to make a just-written row show up in a "List rows" read.
+  checkoutLog.unshift({ ...event, _local: true, _addedAt: Date.now() });
+  saveLocalCache();
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
