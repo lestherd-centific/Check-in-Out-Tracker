@@ -701,12 +701,18 @@ document.getElementById("resultModalClose").addEventListener("click", () => {
 // skipped — which is why the modal shows it as an unfinished step rather than
 // a suggestion.
 //
-// Windows hands mailto: to the shell with a length ceiling somewhere around
-// 2,000 characters, and a silently truncated e-mail is worse than a short one,
-// so long descriptions are trimmed to fit and the reader is pointed at the log
-// for the rest. Copying to the clipboard has no such limit and always carries
-// the full text.
-const MAILTO_MAX_CHARS = 1900;
+// The draft opens in Outlook on the web rather than through a mailto: link.
+// mailto: hands off to whatever the machine has registered as its mail client,
+// and on the moderators' machines that is variously Gmail, nothing at all, or
+// Outlook — a feature that works on one person's laptop and silently opens a
+// blank tab on another's is worse than no feature. A compose deep link behaves
+// identically in every browser and needs nothing configured.
+//
+// URLs are not unlimited either, so long descriptions are trimmed to fit and
+// the reader is pointed at the log for the rest. Copying to the clipboard has
+// no such limit and always carries the full text.
+const OUTLOOK_COMPOSE_URL = "https://outlook.office.com/mail/deeplink/compose";
+const COMPOSE_MAX_CHARS = 7000;
 
 function trimTo(text, limit){
   const s = String(text || "").trim();
@@ -765,18 +771,22 @@ function opsEmailBody(issues, descLimit){
   ].join("\n");
 }
 
-function opsMailtoUrl(issues){
-  const build = limit =>
-    "mailto:" + OPS_EMAIL_TO.join(",") +
-    "?cc=" + encodeURIComponent(OPS_EMAIL_CC.join(",")) +
-    "&subject=" + encodeURIComponent(opsEmailSubject(issues)) +
-    "&body=" + encodeURIComponent(opsEmailBody(issues, limit));
+function opsComposeUrl(issues){
+  const build = limit => {
+    const q = new URLSearchParams({
+      to: OPS_EMAIL_TO.join(";"),
+      cc: OPS_EMAIL_CC.join(";"),
+      subject: opsEmailSubject(issues),
+      body: opsEmailBody(issues, limit)
+    });
+    return `${OUTLOOK_COMPOSE_URL}?${q.toString()}`;
+  };
 
-  let limit = 700;
+  let limit = 3000;
   let url = build(limit);
   // Shrink the free-text part until the whole URL fits, rather than letting
-  // the shell cut the e-mail off mid-sentence.
-  while (url.length > MAILTO_MAX_CHARS && limit > 60){
+  // the browser cut the e-mail off mid-sentence.
+  while (url.length > COMPOSE_MAX_CHARS && limit > 60){
     limit = Math.floor(limit * 0.6);
     url = build(limit);
   }
@@ -815,11 +825,11 @@ async function copyText(text){
   }
 }
 
-// null until the moderator acts, then "mailto" or "copy" — the two produce
+// null until the moderator acts, then "compose" or "copy" — the two produce
 // different follow-on instructions, so the step remembers which happened.
 let escalationIssues = [];
 let escalationDone = null;
-let lastOpsMailto = "";
+let lastOpsComposeUrl = "";
 
 function renderEscalationSteps(){
   const n = escalationIssues.length;
@@ -827,16 +837,16 @@ function renderEscalationSteps(){
     `To ${OPS_EMAIL_TO.join(", ")}` +
     (OPS_EMAIL_CC.length ? ` · cc ${OPS_EMAIL_CC.join(", ")}` : "");
 
-  const stepTwo = escalationDone === "mailto"
+  const stepTwo = escalationDone === "compose"
     ? { title: "Operations notified",
-        sub: "Your draft opened in Outlook. Press Send there — it isn't on its way until you do." }
+        sub: "Your draft opened in Outlook in a new tab. Press Send there — it isn't on its way until you do." }
     : escalationDone === "copy"
       ? { title: "Operations notified",
           sub: "The message is on your clipboard. Paste it into a new e-mail and send it." }
       : { title: "Tell operations",
           sub: n > 1
-            ? "One e-mail covering all of them, so operations knows what's down."
-            : "A short e-mail so operations knows this device is down." };
+            ? "Opens one draft in Outlook covering all of them, so operations knows what's down."
+            : "Opens a draft in Outlook so operations knows this device is down." };
 
   const steps = [
     { done: true, title: "Report filed",
@@ -854,23 +864,18 @@ function renderEscalationSteps(){
         <div class="esc-sub">${escapeHtml(s.sub)}</div>
         ${idx === 1 ? `<div class="esc-recipients">${escapeHtml(recipients)}</div>
         <div class="esc-actions">
-          <button class="primary" id="esc-mailto">${escalationDone ? "Open the draft again" : "Open e-mail draft"}</button>
+          <button class="primary" id="esc-compose">${escalationDone ? "Open the draft again" : "Open draft in Outlook"}</button>
           <button class="link-btn" id="esc-copy">Copy the text instead</button>
         </div>` : ""}
       </div>
     </li>`).join("");
 
-  document.getElementById("esc-mailto").addEventListener("click", () => {
-    lastOpsMailto = opsMailtoUrl(escalationIssues);
-    // An anchor rather than location.href: handing mailto: to the shell this
-    // way doesn't disturb the page if no mail client is registered.
-    const a = document.createElement("a");
-    a.href = lastOpsMailto;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    escalationDone = "mailto";
+  document.getElementById("esc-compose").addEventListener("click", () => {
+    lastOpsComposeUrl = opsComposeUrl(escalationIssues);
+    // A new tab, so the moderator doesn't lose their place mid check-in.
+    // noopener because the opened page has no business reaching back here.
+    window.open(lastOpsComposeUrl, "_blank", "noopener");
+    escalationDone = "compose";
     renderEscalationSteps();
   });
 
