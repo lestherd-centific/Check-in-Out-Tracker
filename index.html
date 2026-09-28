@@ -115,7 +115,16 @@
   footer.note{font-size:11.5px;color:var(--footer-muted);margin-top:24px;line-height:1.5;}
 
   #resultModalBackdrop{z-index:70;}
+  #resultModalBackdrop .modal{width:380px;}
   #resultModalMessage{font-size:13.5px;line-height:1.5;margin-top:6px;}
+  .result-lead{font-size:13.5px;line-height:1.5;}
+  /* Capped and scrollable: a twelve-device batch shouldn't push the Close
+     button off the bottom of the screen on a phone. */
+  .result-list{list-style:none;padding:0;margin:11px 0 0;max-height:240px;overflow-y:auto;}
+  .result-list li{padding:7px 10px;border-radius:7px;background:var(--note-bg);margin-bottom:5px;font-size:13px;line-height:1.45;}
+  .result-list li b{font-weight:700;}
+  .result-list li span{color:var(--sub);}
+  .result-note{font-size:12.5px;line-height:1.5;color:var(--sub);margin-top:11px;}
 
   #progressModalBackdrop{z-index:60;}
   .progress-track{width:100%;height:8px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:12px;}
@@ -601,11 +610,27 @@ function setSyncStatus(msg){
 // Deliberately a modal that has to be dismissed by hand, not an
 // auto-disappearing toast — a checkout/checkin confirmation is exactly the
 // kind of message that's easy to miss if it just fades on its own.
-function showResultModal(title, message, isError){
+//
+// `details` turns the device names into an actual list instead of a comma-run
+// buried in a paragraph. Three devices as prose already wraps awkwardly; eight
+// is unreadable, and a moderator scanning for the one tag they care about
+// shouldn't have to parse a sentence to find it.
+//
+//   details.items  [{ main, sub }]  one line each, main in bold
+//   details.note   a closing line, e.g. what failed and what to do about it
+function showResultModal(title, message, isError, details){
   document.getElementById("resultModalTitle").textContent = title;
   const msgEl = document.getElementById("resultModalMessage");
-  msgEl.textContent = message;
-  msgEl.style.color = isError ? "var(--cond-damaged)" : "var(--ink)";
+  const items = (details && details.items) || [];
+  const note = details && details.note;
+
+  msgEl.innerHTML =
+    `<div class="result-lead" style="color:${isError ? "var(--cond-damaged)" : "var(--ink)"}">${escapeHtml(message)}</div>` +
+    (items.length
+      ? `<ul class="result-list">${items.map(it => `<li><b>${escapeHtml(it.main)}</b>${it.sub ? ` <span>${escapeHtml(it.sub)}</span>` : ""}</li>`).join("")}</ul>`
+      : "") +
+    (note ? `<div class="result-note">${escapeHtml(note)}</div>` : "");
+
   document.getElementById("resultModalBackdrop").classList.add("open");
 }
 document.getElementById("resultModalClose").addEventListener("click", () => {
@@ -915,7 +940,7 @@ async function postIssue(issue){
     status: "Open", resolutionNotes: "", deviceRef: issue.deviceRef || "",
     partner: issue.partner || ""
   }, "Report issue");
-  if (!result.ok) return { ok: false };
+  if (!result.ok) return { ok: false, unknown: !!result.unknown };
   // Show it straight away rather than waiting for the next poll.
   deviceIssues.unshift({ ...issue, status: "Open", resolutionNotes: "" });
   renderIssues();
@@ -1463,7 +1488,7 @@ document.getElementById("co-submit").addEventListener("click", async () => {
     // Excel file at the exact same instant can get throttled by Excel
     // Online, so batches go one at a time rather than all in parallel.
     const result = await postEvent(event);
-    if (!result.ok) failed.push({ id, rec, tag: d.tag });
+    if (!result.ok) failed.push({ id, rec, tag: d.tag, unknown: !!result.unknown });
     updateProgressModal(`${d.tag} — ${d.model} (${i + 1} of ${entries.length})`, ((i + 1) / entries.length) * 100);
   }
   submitting = false;
@@ -1471,22 +1496,32 @@ document.getElementById("co-submit").addEventListener("click", async () => {
 
   if (failed.length > 0){
     const failedTags = failed.map(f => f.tag);
-    errEl.textContent = `Checked out ${entries.length - failed.length} of ${entries.length} — couldn't reach the server for: ${failedTags.join(", ")}. Try again for those.`;
-    showResultModal("Some checkouts failed", `Checked out ${entries.length - failed.length} of ${entries.length}. Couldn't reach the server for: ${failedTags.join(", ")}. Try again for those.`, true);
+    const anyUnknown = failed.some(f => f.unknown);
+    errEl.textContent = `Checked out ${entries.length - failed.length} of ${entries.length} — couldn't confirm: ${failedTags.join(", ")}.`;
+    showResultModal(
+      anyUnknown ? "Some checkouts weren't confirmed" : "Some checkouts failed",
+      `Checked out ${entries.length - failed.length} of ${entries.length}. These weren't confirmed:`,
+      true,
+      { items: failed.map(f => ({ main: f.tag, sub: f.rec.device.model + (f.unknown ? " · outcome unknown" : "") })),
+        note: anyUnknown
+          ? "The server didn't answer in time — these may still have gone through. Refresh the page and check Check In before tapping Check out again, or you'll record them twice."
+          : "They're still selected — tap Check out again to retry just these." });
     // Keep only the failed ones selected (with their condition/notes intact) so retrying doesn't re-submit ones that already succeeded.
     coSelectedDevices = new Map(failed.map(f => [f.id, f.rec]));
   } else {
-    const names = entries.map(([, rec]) => `${rec.device.tag} (${rec.device.model})`).join(", ");
-    let msg = entries.length > 1 ? `Checked out ${entries.length} devices: ${names}.` : `Checked out ${names}.`;
-    if (takenSince.length > 0){
-      // Said plainly rather than silently dropped — a moderator who thinks
-      // they have five devices and walks off with four is the failure this
-      // whole check exists to prevent.
-      msg += " " + takenSince.map(t => t.taker
-        ? `${t.device.tag} was just taken by ${withPartner(t.taker.modName, t.taker.partner)}`
-        : `${t.device.tag} has just been reported and is out of service`).join("; ") + " — not included.";
-    }
-    showResultModal("Checked out", msg, takenSince.length > 0);
+    // Said plainly rather than silently dropped — a moderator who thinks they
+    // have five devices and walks off with four is the failure the pre-submit
+    // check exists to prevent, so anything removed is named in the note.
+    const note = takenSince.length > 0
+      ? "Not included: " + takenSince.map(t => t.taker
+          ? `${t.device.tag}, just taken by ${withPartner(t.taker.modName, t.taker.partner)}`
+          : `${t.device.tag}, just reported and out of service`).join("; ") + "."
+      : "";
+    showResultModal(
+      "Checked out",
+      entries.length > 1 ? `${entries.length} devices are now checked out to you:` : "This device is now checked out to you:",
+      takenSince.length > 0,
+      { items: entries.map(([, rec]) => ({ main: rec.device.tag, sub: rec.device.model })), note });
     coSelectedDevices.clear();
     document.getElementById("co-device-search").value = "";
     document.getElementById("co-destination").value = "";
@@ -1752,7 +1787,7 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
     // Sequential, same reasoning as the checkout batch — avoids hammering
     // Excel Online with simultaneous Run Script calls.
     const result = await postEvent(submitEvt);
-    if (!result.ok) failed.push({ checkoutId, rec, tag: c.tag });
+    if (!result.ok) failed.push({ checkoutId, rec, tag: c.tag, unknown: !!result.unknown });
     // Damaged gear files its own report, so the escalation path starts without
     // anyone having to remember a second step. Only after the check-in itself
     // succeeded — a report for an event that never landed would be misleading.
@@ -1769,7 +1804,7 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
         context: "During check-in",
         deviceRef: c.deviceId || ""
       });
-      if (!filed.ok) issueFilingFailures.push(c.tag);
+      if (!filed.ok) issueFilingFailures.push({ tag: c.tag, unknown: !!filed.unknown });
     }
     updateProgressModal(`${c.tag} — ${c.model} (${i + 1} of ${entries.length})`, ((i + 1) / entries.length) * 100);
   }
@@ -1778,23 +1813,40 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
 
   if (failed.length > 0){
     const failedTags = failed.map(f => f.tag);
-    errEl.textContent = `Checked in ${entries.length - failed.length} of ${entries.length} — couldn't reach the server for: ${failedTags.join(", ")}. Try again for those.`;
-    showResultModal("Some check-ins failed", `Checked in ${entries.length - failed.length} of ${entries.length}. Couldn't reach the server for: ${failedTags.join(", ")}. Try again for those.`, true);
+    const anyUnknown = failed.some(f => f.unknown);
+    errEl.textContent = `Checked in ${entries.length - failed.length} of ${entries.length} — couldn't confirm: ${failedTags.join(", ")}.`;
+    showResultModal(
+      anyUnknown ? "Some check-ins weren't confirmed" : "Some check-ins failed",
+      `Checked in ${entries.length - failed.length} of ${entries.length}. These weren't confirmed:`,
+      true,
+      { items: failed.map(f => ({ main: f.tag, sub: f.rec.event.model + (f.unknown ? " · outcome unknown" : "") })),
+        note: anyUnknown
+          ? "The server didn't answer in time — these may still have gone through. Refresh the page and check before tapping Check in again, or you'll record them twice."
+          : "They're still selected — tap Check in again to retry just these." });
     // Keep only the failed ones selected (with their condition/notes intact) so retrying doesn't re-submit ones that already succeeded.
     ciSelected = new Map(failed.map(f => [f.checkoutId, f.rec]));
   } else {
-    const names = entries.map(([, rec]) => `${rec.event.tag} (${rec.event.model})`).join(", ");
     const damaged = entries.filter(([, rec]) => rec.condition === "Damaged").length;
-    let msg = entries.length > 1 ? `Checked in ${entries.length} items: ${names}.` : `Checked in ${names}.`;
+    let note = "";
     if (damaged > 0 && issueFilingFailures.length === 0){
-      msg += damaged > 1
-        ? ` ${damaged} issue reports were filed — those devices are held out of check-out until they're cleared.`
-        : " An issue report was filed — that device is held out of check-out until it's cleared.";
+      note = damaged > 1
+        ? `${damaged} issue reports were filed — those devices are held out of check-out until they're cleared.`
+        : "An issue report was filed — that device is held out of check-out until it's cleared.";
     }
     if (issueFilingFailures.length > 0){
-      msg += ` Couldn't file an issue report for ${issueFilingFailures.join(", ")} — please report it from the Device Issues tab.`;
+      const tags = issueFilingFailures.map(f => f.tag).join(", ");
+      note = issueFilingFailures.some(f => f.unknown)
+        ? `Couldn't confirm the issue report for ${tags} — check the Device Issues tab first, and only file it again if it isn't there.`
+        : `Couldn't file an issue report for ${tags} — please report it from the Device Issues tab.`;
     }
-    showResultModal("Checked in", msg, issueFilingFailures.length > 0);
+    showResultModal(
+      "Checked in",
+      entries.length > 1 ? `${entries.length} items returned:` : "Item returned:",
+      issueFilingFailures.length > 0,
+      { items: entries.map(([, rec]) => ({
+          main: rec.event.tag,
+          sub: rec.condition === "Good" ? rec.event.model : `${rec.event.model} · ${rec.condition}`
+        })), note });
     ciSelected.clear();
   }
   setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
@@ -1833,8 +1885,12 @@ function renderActivity(){
 // and a blind retry of a request that actually succeeded writes the row twice:
 //
 //   - fetch() rejecting means the request never completed — safe to retry.
-//   - 429 and 5xx come from the platform before the flow does its work —
+//   - 429 and most 5xx come from the platform before the flow does its work —
 //     safe to retry.
+//   - 504 and 408 are the exception: the gateway stopped waiting, but the run
+//     usually carries on and writes its row anyway. Retrying those duplicates
+//     the row, so they come back as ok:false, unknown:true and the moderator
+//     is told to check rather than re-file.
 //   - any other non-OK response means Power Automate answered deliberately, so
 //     retrying would just repeat a rejection it already made up its mind about.
 //
@@ -1856,6 +1912,15 @@ async function postJsonWithRetry(url, payload, label){
         body: JSON.stringify(payload)
       });
       if (res.ok) return { ok: true };
+      // 504/408 are the one case we must NOT retry. They mean the gateway gave
+      // up waiting, not that the flow failed — the run is very often still
+      // going and the row still lands. Retrying here is how you get duplicate
+      // rows in the workbook. Report the outcome as unknown instead and let
+      // the moderator check before re-filing.
+      if (res.status === 504 || res.status === 408){
+        console.error(`${label}: HTTP ${res.status} — timed out waiting, outcome unknown, not retrying`);
+        return { ok: false, unknown: true };
+      }
       if (res.status === 429 || res.status >= 500){
         lastErr = new Error("HTTP " + res.status);
         console.warn(`${label}: HTTP ${res.status}, attempt ${attempt + 1}`);
@@ -1892,7 +1957,10 @@ async function postEvent(event){
     // depends on.
     partner: event.partner || ""
   }, "Log event");
-  if (!result.ok) return { ok: false, message: "Couldn't reach the server — try again in a moment." };
+  if (!result.ok) return { ok: false, unknown: !!result.unknown,
+    message: result.unknown
+      ? "The server didn't answer in time — this may still have gone through."
+      : "Couldn't reach the server — try again in a moment." };
   // Optimistic local append so the UI reflects this immediately, rather
   // than waiting for the next poll — Excel/Power Automate can take a few
   // seconds to make a just-written row show up in a "List rows" read.
@@ -2289,6 +2357,15 @@ document.getElementById("issue-submit").addEventListener("click", async () => {
   btn.disabled = false; btn.textContent = "Submit report";
 
   if (!result.ok){
+    if (result.unknown){
+      // The gateway timed out, so this may well have been written. Sending it
+      // again is what puts the same fault in the log twice.
+      closeIssueForm();
+      showResultModal("Report not confirmed",
+        "The server didn't answer in time. The report may still have gone through — check the Device Issues tab in a minute, and only file it again if it isn't listed.",
+        true);
+      return;
+    }
     errEl.textContent = "Couldn't reach the server — try again in a moment.";
     return;
   }
