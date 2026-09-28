@@ -126,6 +126,25 @@
   .result-list li span{color:var(--sub);}
   .result-note{font-size:12.5px;line-height:1.5;color:var(--sub);margin-top:11px;}
 
+  /* --- Escalation steps -------------------------------------------------- */
+  /* Sits above the result modal (70), because on the check-in path it opens
+     as that one closes. */
+  #escalationBackdrop{z-index:75;}
+  #escalationBackdrop .modal{width:400px;}
+  .esc-lead{font-size:13.5px;line-height:1.5;margin-top:6px;}
+  .esc-steps{list-style:none;padding:0;margin:14px 0 0;}
+  .esc-step{display:flex;gap:11px;padding:12px 0;border-top:1px solid var(--border);}
+  .esc-step:first-child{border-top:none;padding-top:4px;}
+  .esc-bullet{flex-shrink:0;width:22px;height:22px;border-radius:50%;border:1.5px solid var(--border);
+    color:var(--sub);font-size:11.5px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+  .esc-step.done .esc-bullet{background:var(--cond-good-bg);border-color:var(--cond-good);color:var(--cond-good);}
+  .esc-body{flex:1;min-width:0;}
+  .esc-title{font-size:13.5px;font-weight:600;}
+  .esc-step.done .esc-title{color:var(--cond-good);}
+  .esc-sub{font-size:12.5px;color:var(--sub);line-height:1.5;margin-top:3px;}
+  .esc-recipients{font-size:12px;color:var(--sub);line-height:1.5;margin-top:6px;word-break:break-word;}
+  .esc-actions{display:flex;align-items:center;gap:14px;margin-top:10px;flex-wrap:wrap;}
+
   #progressModalBackdrop{z-index:60;}
   .progress-track{width:100%;height:8px;background:var(--border);border-radius:999px;overflow:hidden;margin-top:12px;}
   .progress-fill{height:100%;width:0%;background:var(--c-violet);border-radius:999px;transition:width .25s ease;}
@@ -436,6 +455,20 @@
   </div>
 </div>
 
+<!-- Follows a filed issue report. Filing is already done by the time this
+     opens; the second step is the one the moderator still has to do. -->
+<div class="modal-backdrop" id="escalationBackdrop">
+  <div class="modal">
+    <div class="eyebrow">Escalation</div>
+    <h3 id="escalationTitle">Reported</h3>
+    <div class="esc-lead" id="escalationLead"></div>
+    <ol class="esc-steps" id="escalationSteps"></ol>
+    <div style="margin-top:16px;">
+      <button class="primary" id="escalationClose" style="width:100%;">Done</button>
+    </div>
+  </div>
+</div>
+
 <!-- Shown while checkout/check-in requests are in flight; closes itself
      once the batch finishes, then the result modal above takes over. -->
 <div class="modal-backdrop" id="progressModalBackdrop">
@@ -526,6 +559,14 @@ const LOG_EVENT_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environm
 // means a problem with the issue log breaks the issue log and nothing else.
 const ISSUES_LOAD_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/21/workflows/fa2ead94bdb44ea9853d423c18bf3966/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=oaoPbIDKqioi9Z1YaNUi3QnHIUwwLuamrTUOoxSUsrE";
 const ISSUES_LOG_URL = "https://default9b415834803a4da0afdcfe6b1d52d6.49.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/26/workflows/18f419c2912d45ec96c4b0953ca44d98/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=Km6Bz_3j0i5LDtnLwG_401C98c9mrKFHJiFAfemZPPg";
+
+// Operations escalation. A filed report tells the Audit Lead; this tells
+// operations, so they hear about damage without anyone having to chase them
+// in chat. Change who receives it by editing these three lines and nothing
+// else — the wording is built from the report itself.
+const OPS_EMAIL_TO = ["shreya.sreedharan@centific.com"];
+const OPS_EMAIL_CC = ["lesther.dumosmog@centific.com", "kyle.crowe@centific.com"];
+const OPS_EMAIL_GREETING = "Shreya";
 
 const AUTH_KEY = "checkinout-auth-v1";
 const STORE_KEY = "checkinout-cache-v1";
@@ -633,8 +674,231 @@ function showResultModal(title, message, isError, details){
 
   document.getElementById("resultModalBackdrop").classList.add("open");
 }
+// A check-in that filed reports queues the escalation here rather than opening
+// two modals on top of each other — the moderator finishes reading what came
+// back, closes it, and the remaining step takes its place.
+let pendingEscalation = null;
+
 document.getElementById("resultModalClose").addEventListener("click", () => {
   document.getElementById("resultModalBackdrop").classList.remove("open");
+  if (pendingEscalation && pendingEscalation.length){
+    const queued = pendingEscalation;
+    pendingEscalation = null;
+    showEscalationModal(queued);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Operations escalation e-mail
+// ---------------------------------------------------------------------------
+// Filing a report holds the device out of service, which is the safety part.
+// This is the communication part: operations needs to know a device is down,
+// and before this existed somebody had to remember to message them.
+//
+// The draft opens in the moderator's own mail client rather than being sent by
+// the flow, so it comes from the person who actually saw the damage and they
+// can add anything the form didn't capture. The trade is that it can be
+// skipped — which is why the modal shows it as an unfinished step rather than
+// a suggestion.
+//
+// Windows hands mailto: to the shell with a length ceiling somewhere around
+// 2,000 characters, and a silently truncated e-mail is worse than a short one,
+// so long descriptions are trimmed to fit and the reader is pointed at the log
+// for the rest. Copying to the clipboard has no such limit and always carries
+// the full text.
+const MAILTO_MAX_CHARS = 1900;
+
+function trimTo(text, limit){
+  const s = String(text || "").trim();
+  if (!limit || s.length <= limit) return s;
+  return s.slice(0, Math.max(0, limit - 1)).trimEnd() + "…";
+}
+
+function opsEmailSubject(issues){
+  if (issues.length === 1){
+    const i = issues[0];
+    const name = i.tag ? `${i.tag} — ${i.deviceType || ""}`.trim() : (i.deviceType || "Device");
+    const where = [i.project, i.location].filter(Boolean).join(" / ");
+    return `Device issue — ${name}${where ? ` (${where})` : ""}`;
+  }
+  const where = issues[0] && issues[0].project;
+  return `Device issues — ${issues.length} items reported${where ? ` (${where})` : ""}`;
+}
+
+// descLimit caps each "what's wrong" paragraph; pass 0 for the full text.
+function opsEmailBody(issues, descLimit){
+  const me = (authInfo && (authInfo.name || authInfo.login)) || "";
+  const many = issues.length > 1;
+
+  const blockFor = i => {
+    const lines = [];
+    lines.push(`Device: ${[i.tag, i.deviceType].filter(Boolean).join(" — ") || "Unnamed item"}`);
+    if (i.serial) lines.push(`Serial: ${i.serial}`);
+    const where = [i.project, i.location].filter(Boolean).join(" / ");
+    if (where) lines.push(`Project / Location: ${where}`);
+    lines.push(`Reported by: ${withPartner(i.reportedBy, i.partner)}`);
+    if (i.context) lines.push(`When noticed: ${i.context}`);
+    if (i.ts) lines.push(`Date/Time: ${i.ts}`);
+    if (i.id) lines.push(`Report ID: ${i.id}`);
+    lines.push("");
+    lines.push("What's wrong:");
+    lines.push(trimTo(i.description, descLimit) || "(no description given)");
+    return lines.join("\n");
+  };
+
+  return [
+    `Hi ${OPS_EMAIL_GREETING},`,
+    "",
+    many
+      ? `${issues.length} devices have been reported with issues and are held out of service until they're cleared.`
+      : "A device has been reported with an issue and is held out of service until it's cleared.",
+    "",
+    issues.map(blockFor).join("\n\n----------\n\n"),
+    "",
+    many
+      ? "They're logged in the Device Issue Report and stay out of check-out until the Field Equipment Audit Lead marks each one Resolved or Replaced."
+      : "It's logged in the Device Issue Report and stays out of check-out until the Field Equipment Audit Lead marks it Resolved or Replaced.",
+    "",
+    "Thanks,",
+    me,
+    "Data Collection US Hub"
+  ].join("\n");
+}
+
+function opsMailtoUrl(issues){
+  const build = limit =>
+    "mailto:" + OPS_EMAIL_TO.join(",") +
+    "?cc=" + encodeURIComponent(OPS_EMAIL_CC.join(",")) +
+    "&subject=" + encodeURIComponent(opsEmailSubject(issues)) +
+    "&body=" + encodeURIComponent(opsEmailBody(issues, limit));
+
+  let limit = 700;
+  let url = build(limit);
+  // Shrink the free-text part until the whole URL fits, rather than letting
+  // the shell cut the e-mail off mid-sentence.
+  while (url.length > MAILTO_MAX_CHARS && limit > 60){
+    limit = Math.floor(limit * 0.6);
+    url = build(limit);
+  }
+  return url;
+}
+
+function opsEmailPlainText(issues){
+  return `To: ${OPS_EMAIL_TO.join(", ")}\nCc: ${OPS_EMAIL_CC.join(", ")}\n` +
+         `Subject: ${opsEmailSubject(issues)}\n\n${opsEmailBody(issues, 0)}`;
+}
+
+async function copyText(text){
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch (err){
+    console.warn("Clipboard API refused, falling back:", err);
+  }
+  // execCommand is deprecated but still the only thing that works when the
+  // page isn't a secure context or the permission was denied.
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed"; ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    ta.remove();
+    return ok;
+  } catch (err){
+    console.error("Couldn't copy to the clipboard:", err);
+    return false;
+  }
+}
+
+// null until the moderator acts, then "mailto" or "copy" — the two produce
+// different follow-on instructions, so the step remembers which happened.
+let escalationIssues = [];
+let escalationDone = null;
+let lastOpsMailto = "";
+
+function renderEscalationSteps(){
+  const n = escalationIssues.length;
+  const recipients =
+    `To ${OPS_EMAIL_TO.join(", ")}` +
+    (OPS_EMAIL_CC.length ? ` · cc ${OPS_EMAIL_CC.join(", ")}` : "");
+
+  const stepTwo = escalationDone === "mailto"
+    ? { title: "Operations notified",
+        sub: "Your draft opened in Outlook. Press Send there — it isn't on its way until you do." }
+    : escalationDone === "copy"
+      ? { title: "Operations notified",
+          sub: "The message is on your clipboard. Paste it into a new e-mail and send it." }
+      : { title: "Tell operations",
+          sub: n > 1
+            ? "One e-mail covering all of them, so operations knows what's down."
+            : "A short e-mail so operations knows this device is down." };
+
+  const steps = [
+    { done: true, title: "Report filed",
+      sub: n > 1
+        ? `${n} devices logged and held out of check-out until the Audit Lead clears them.`
+        : "Logged and held out of check-out until the Audit Lead clears it." },
+    { done: escalationDone !== null, ...stepTwo }
+  ];
+
+  document.getElementById("escalationSteps").innerHTML = steps.map((s, idx) => `
+    <li class="esc-step${s.done ? " done" : ""}">
+      <span class="esc-bullet">${s.done ? "✓" : idx + 1}</span>
+      <div class="esc-body">
+        <div class="esc-title">${escapeHtml(s.title)}</div>
+        <div class="esc-sub">${escapeHtml(s.sub)}</div>
+        ${idx === 1 ? `<div class="esc-recipients">${escapeHtml(recipients)}</div>
+        <div class="esc-actions">
+          <button class="primary" id="esc-mailto">${escalationDone ? "Open the draft again" : "Open e-mail draft"}</button>
+          <button class="link-btn" id="esc-copy">Copy the text instead</button>
+        </div>` : ""}
+      </div>
+    </li>`).join("");
+
+  document.getElementById("esc-mailto").addEventListener("click", () => {
+    lastOpsMailto = opsMailtoUrl(escalationIssues);
+    // An anchor rather than location.href: handing mailto: to the shell this
+    // way doesn't disturb the page if no mail client is registered.
+    const a = document.createElement("a");
+    a.href = lastOpsMailto;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    escalationDone = "mailto";
+    renderEscalationSteps();
+  });
+
+  document.getElementById("esc-copy").addEventListener("click", async () => {
+    const ok = await copyText(opsEmailPlainText(escalationIssues));
+    if (ok){
+      escalationDone = "copy";
+      renderEscalationSteps();
+    } else {
+      document.getElementById("esc-copy").textContent = "Couldn't copy — select the text manually";
+    }
+  });
+}
+
+function showEscalationModal(issues){
+  escalationIssues = issues || [];
+  escalationDone = null;
+  const n = escalationIssues.length;
+  document.getElementById("escalationTitle").textContent = n > 1 ? "Reported" : "Reported";
+  document.getElementById("escalationLead").textContent = n > 1
+    ? `${n} issue reports are in. One thing left:`
+    : "The report is in. One thing left:";
+  renderEscalationSteps();
+  document.getElementById("escalationBackdrop").classList.add("open");
+}
+
+document.getElementById("escalationClose").addEventListener("click", () => {
+  document.getElementById("escalationBackdrop").classList.remove("open");
 });
 
 // Explicit, hard-to-miss "this is loading" indicator for a checkout/checkin
@@ -1769,6 +2033,9 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
   // the equipment is recorded as back, but nobody has been told it's damaged,
   // so it has to be said out loud rather than swallowed.
   const issueFilingFailures = [];
+  // Reports that actually landed, so the escalation step can cover the whole
+  // batch in one e-mail rather than one per device.
+  const filedIssues = [];
   for (let i = 0; i < entries.length; i++){
     const [checkoutId, rec] = entries[i];
     const c = rec.event;
@@ -1793,7 +2060,7 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
     // succeeded — a report for an event that never landed would be misleading.
     if (result.ok && rec.condition === "Damaged"){
       const dev = liveDevices.find(ld => ld.id === c.deviceId);
-      const filed = await postIssue({
+      const issue = {
         id: "iss-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
         ts: pacificTimestamp(),
         reportedBy: authInfo.name || authInfo.login, partner: partnerName,
@@ -1803,13 +2070,19 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
         description: rec.notes.trim(),
         context: "During check-in",
         deviceRef: c.deviceId || ""
-      });
-      if (!filed.ok) issueFilingFailures.push({ tag: c.tag, unknown: !!filed.unknown });
+      };
+      const filed = await postIssue(issue);
+      if (filed.ok) filedIssues.push({ ...issue, status: "Open" });
+      else issueFilingFailures.push({ tag: c.tag, unknown: !!filed.unknown });
     }
     updateProgressModal(`${c.tag} — ${c.model} (${i + 1} of ${entries.length})`, ((i + 1) / entries.length) * 100);
   }
   submitting = false;
   hideProgressModal();
+
+  // Queued either way: a report that landed still needs operations told, even
+  // if some other device in the same batch failed to check in.
+  pendingEscalation = filedIssues.length ? filedIssues : null;
 
   if (failed.length > 0){
     const failedTags = failed.map(f => f.tag);
@@ -1830,8 +2103,8 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
     let note = "";
     if (damaged > 0 && issueFilingFailures.length === 0){
       note = damaged > 1
-        ? `${damaged} issue reports were filed — those devices are held out of check-out until they're cleared.`
-        : "An issue report was filed — that device is held out of check-out until it's cleared.";
+        ? `${damaged} issue reports were filed — those devices are held out of check-out until they're cleared. Close this to notify operations.`
+        : "An issue report was filed — that device is held out of check-out until it's cleared. Close this to notify operations.";
     }
     if (issueFilingFailures.length > 0){
       const tags = issueFilingFailures.map(f => f.tag).join(", ");
@@ -2370,8 +2643,7 @@ document.getElementById("issue-submit").addEventListener("click", async () => {
     return;
   }
   closeIssueForm();
-  showResultModal("Report submitted",
-    "The Hardware Tracking Owner can see it now. This device is held out of check-out until it's marked Resolved or Replaced.");
+  showEscalationModal([{ ...built.issue, status: "Open" }]);
 });
 
 // ---------------------------------------------------------------------------
