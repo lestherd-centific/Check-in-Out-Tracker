@@ -711,7 +711,10 @@ document.getElementById("resultModalClose").addEventListener("click", () => {
 // URLs are not unlimited either, so long descriptions are trimmed to fit and
 // the reader is pointed at the log for the rest. Copying to the clipboard has
 // no such limit and always carries the full text.
-const OUTLOOK_COMPOSE_URL = "https://outlook.office.com/mail/deeplink/compose";
+// The /0/ is the mailbox index and it matters: without it this tenant
+// redirects to the inbox and drops the query string entirely, landing the
+// moderator on their mail with no draft. Confirmed by hand before wiring in.
+const OUTLOOK_COMPOSE_URL = "https://outlook.office.com/mail/0/deeplink/compose";
 const COMPOSE_MAX_CHARS = 7000;
 
 function trimTo(text, limit){
