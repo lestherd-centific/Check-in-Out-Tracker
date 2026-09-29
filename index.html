@@ -684,6 +684,24 @@ const SESSION_REQUIREMENTS = {
   ]
 };
 
+// Projects this site offers. The main Hardware Tracker holds every project the
+// hub runs; this app is only used by the moderators of some of them, and a
+// picker full of projects nobody here touches is a way to file a check-out
+// against the wrong one.
+//
+// A list here rather than a column in the tracker's workbook: that workbook is
+// shared with the other app and adding a column to it means a schema change to
+// somebody else's system of record. This is a one-line edit with no blast
+// radius. If the list ever starts changing weekly, or somebody without access
+// to this file needs to control it, a column becomes worth the cost.
+//
+// An empty array means "no restriction" — every active project shows.
+const ALLOWED_PROJECTS = ["Sesame"];
+
+function projectIsOffered(name){
+  return ALLOWED_PROJECTS.length === 0 || ALLOWED_PROJECTS.includes(name);
+}
+
 function requirementsFor(project){
   return SESSION_REQUIREMENTS[project] || [];
 }
@@ -1262,7 +1280,10 @@ async function loadMainTrackerData(){
     // mods only ever check items in/out of an actual project, so it's
     // deliberately excluded from this list.
     liveProjects = [...new Set(liveDevices.map(d => d.bucket))]
-      .filter((b, i, arr) => arr.indexOf(b) === i && b !== MASTER && !archivedNames.has(b));
+      .filter((b, i, arr) => arr.indexOf(b) === i && b !== MASTER && !archivedNames.has(b))
+      // Applied here rather than at each picker, so every list in the app —
+      // check-out, and the issue form's manual entry — agrees on what exists.
+      .filter(projectIsOffered);
     renderProjectOptions();
   } catch (err){
     console.error("Main tracker load failed:", err);
