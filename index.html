@@ -568,6 +568,10 @@ const OPS_EMAIL_TO = ["shreya.sreedharan@centific.com"];
 const OPS_EMAIL_CC = ["lesther.dumosmog@centific.com", "kyle.crowe@centific.com"];
 const OPS_EMAIL_GREETING = "Shreya";
 
+// Everyone who should receive the escalation, in order. See opsComposeUrl for
+// why these end up on one line rather than To + Cc.
+function OPS_EMAIL_RECIPIENTS(){ return [...OPS_EMAIL_TO, ...OPS_EMAIL_CC]; }
+
 const AUTH_KEY = "checkinout-auth-v1";
 const STORE_KEY = "checkinout-cache-v1";
 const MASTER = "Master Inventory";
@@ -781,8 +785,16 @@ function opsComposeUrl(issues){
   // plus signs. encodeURIComponent uses %20, which it does decode.
   const build = limit =>
     OUTLOOK_COMPOSE_URL +
-    "?to=" + encodeURIComponent(OPS_EMAIL_TO.join(";")) +
-    "&cc=" + encodeURIComponent(OPS_EMAIL_CC.join(";")) +
+    // Everyone goes on the To line. This tenant's compose deep link accepts
+    // `to` and silently discards `cc` — tested by hand with one address, with
+    // commas and with semicolons, and the Cc field came back empty every time.
+    // Three names on To is less tidy than To + Cc, but a cc that vanishes is
+    // worse: operations would be told and nobody else would know it happened.
+    // The two lists stay separate above so the intent survives, and so this
+    // goes back to a real cc if Microsoft ever honours the parameter.
+    // Addresses are raw and comma-separated: they need no escaping in a query
+    // string, and they come from the constants above, not from user input.
+    "?to=" + OPS_EMAIL_RECIPIENTS().join(",") +
     "&subject=" + encodeURIComponent(opsEmailSubject(issues)) +
     "&body=" + encodeURIComponent(opsEmailBody(issues, limit));
 
@@ -798,7 +810,7 @@ function opsComposeUrl(issues){
 }
 
 function opsEmailPlainText(issues){
-  return `To: ${OPS_EMAIL_TO.join(", ")}\nCc: ${OPS_EMAIL_CC.join(", ")}\n` +
+  return `To: ${OPS_EMAIL_RECIPIENTS().join(", ")}\n` +
          `Subject: ${opsEmailSubject(issues)}\n\n${opsEmailBody(issues, 0)}`;
 }
 
@@ -837,9 +849,7 @@ let lastOpsComposeUrl = "";
 
 function renderEscalationSteps(){
   const n = escalationIssues.length;
-  const recipients =
-    `To ${OPS_EMAIL_TO.join(", ")}` +
-    (OPS_EMAIL_CC.length ? ` · cc ${OPS_EMAIL_CC.join(", ")}` : "");
+  const recipients = `To ${OPS_EMAIL_RECIPIENTS().join(", ")}`;
 
   const stepTwo = escalationDone === "compose"
     ? { title: "Operations notified",
