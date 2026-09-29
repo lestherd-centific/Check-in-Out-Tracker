@@ -101,21 +101,25 @@
   .dev-group-body .device-item{padding-left:34px;}
 
   /* --- Check Out: session requirements ----------------------------------- */
-  .req-box{border:1px solid var(--border);border-radius:8px;padding:11px 12px;margin-bottom:10px;}
+  /* A full-width strip above both panes rather than a column inside the right
+     one: it describes the session, not the basket, and keeping it out of the
+     right pane leaves that side purely "what I'm taking". */
+  .req-box{border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-top:10px;}
+  .req-rows{display:flex;flex-wrap:wrap;gap:2px 22px;}
   .req-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px;}
   .req-title{font-size:12.5px;font-weight:600;}
   .req-score{font-size:11.5px;color:var(--sub);font-weight:600;}
   .req-bar{height:5px;border-radius:999px;background:var(--border);overflow:hidden;margin-bottom:9px;}
   .req-fill{height:100%;width:0;background:var(--cond-good);border-radius:999px;transition:width .2s ease;}
-  .req-row{display:flex;align-items:flex-start;gap:8px;padding:4px 0;font-size:12.5px;}
+  .req-row{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:12.5px;}
   .req-dot{flex-shrink:0;width:17px;height:17px;border-radius:50%;border:1.5px solid var(--border);
     display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:transparent;margin-top:1px;}
   .req-row.done .req-dot{background:var(--cond-good-bg);border-color:var(--cond-good);color:var(--cond-good);}
   .req-row.done .req-label{color:var(--cond-good);font-weight:600;}
   .req-row.none .req-dot{border-color:var(--cond-fair,#d97706);}
   .req-row.none .req-label{color:var(--cond-fair,#d97706);}
-  .req-label{flex:1;min-width:0;}
-  .req-note{flex-shrink:0;font-size:11.5px;color:var(--sub);}
+  .req-label{white-space:nowrap;}
+  .req-note{font-size:11.5px;color:var(--sub);white-space:nowrap;}
 
   /* Narrow screens only: the right pane is below the fold while you pick, so
      the summary follows you down the page. */
@@ -385,9 +389,10 @@
 
     <div class="card" id="co-device-card" style="display:none;">
       <h3>2. Device</h3>
-      <div class="sync-status" style="margin:-4px 0 8px;">Tap a group to take the next free one, or open it with the arrow to pick a serial. Set condition and notes on the right.</div>
+      <div class="sync-status" style="margin:-4px 0 8px;">Open a group to see its serials, then tap the device you want. Condition and notes are set on your selection.</div>
       <input type="text" id="co-device-search" placeholder="Search asset tag, model, or serial…">
       <div class="kit-chip-row" id="co-kit-chips"></div>
+      <div id="co-req-wrap"></div>
       <div class="co-panes">
         <div class="co-pane co-pane-left">
           <div class="co-pane-head"><span>Available</span><span class="co-pane-sub" id="co-avail-sub"></span></div>
@@ -395,7 +400,6 @@
         </div>
         <div class="co-pane co-pane-right" id="co-pane-right">
           <div class="co-pane-head"><span>Your selection</span><span class="co-pane-sub" id="co-sel-sub"></span></div>
-          <div id="co-req-wrap"></div>
           <div id="co-selected-wrap"></div>
         </div>
       </div>
@@ -1716,34 +1720,15 @@ function renderDeviceList(){
       listEl.innerHTML = `<div class="empty-hint">Everything here ${why}.</div>` + listEl.innerHTML;
     }
 
-    // The caret opens the group; the rest of the header takes the next free
-    // one. "I need an SSD" is the common case and "I need that SSD" is rare,
-    // so the common case gets the bigger target.
-    listEl.querySelectorAll(".dev-group-caret").forEach(caret => {
-      caret.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        const model = caret.closest(".dev-group-head").dataset.model;
-        if (coExpandedGroups.has(model)) coExpandedGroups.delete(model);
-        else coExpandedGroups.add(model);
-        renderDeviceList();
-      });
-    });
-
+    // The whole header opens and closes the group, caret included. An earlier
+    // version had the header take the next free serial for you, on the theory
+    // that one SSD is much like another — in practice it handed people gear
+    // they hadn't chosen, so picking is always explicit now.
     listEl.querySelectorAll(".dev-group-head").forEach(head => {
       head.addEventListener("click", () => {
         const model = head.dataset.model;
-        const g = groups.find(x => x.model === model);
-        if (!g || g.available === 0) return;
-        const next = g.entries.find(e => !e.unavailable && !coSelectedDevices.has(e.device.id));
-        if (!next){
-          // Every free one is already in the basket — open the group so they
-          // can take one back out rather than leaving the tap doing nothing.
-          coExpandedGroups.add(model);
-          renderDeviceList();
-          return;
-        }
-        coSelectedDevices.set(next.device.id,
-          { device: next.device, condition: "Good", notes: "", notesOpen: false });
+        if (coExpandedGroups.has(model)) coExpandedGroups.delete(model);
+        else coExpandedGroups.add(model);
         renderDeviceList();
       });
     });
@@ -1828,7 +1813,7 @@ function renderRequirements(project, location){
         <span class="req-score">${done} of ${rows.length} ready</span>
       </div>
       <div class="req-bar"><div class="req-fill" style="width:${pct}%"></div></div>
-      ${rows.map(r => {
+      <div class="req-rows">${rows.map(r => {
         // Amber rather than plain grey when nothing matching exists to take:
         // that's a supply problem, not something the moderator forgot.
         const cls = r.met ? "done" : (r.available ? "" : "none");
@@ -1841,7 +1826,7 @@ function renderRequirements(project, location){
           <span class="req-label">${escapeHtml(r.label)}</span>
           ${note ? `<span class="req-note">${escapeHtml(note)}</span>` : ""}
         </div>`;
-      }).join("")}
+      }).join("")}</div>
     </div>`;
   return rows;
 }
@@ -1900,8 +1885,8 @@ function renderSelectedDevices(){
     entries.length === 0 ? "" : `${entries.length} device${entries.length === 1 ? "" : "s"}`;
 
   if (entries.length === 0){
-    wrap.innerHTML = '<div class="co-empty-sel">Nothing selected yet.<br>Tap a group to take the next free one, ' +
-      'or open it with the arrow to pick a serial.</div>';
+    wrap.innerHTML = '<div class="co-empty-sel">Nothing selected yet.<br>' +
+      'Open a group, then tap the device you want.</div>';
     detailsCard.style.display = "none";
     updateSubmitEnabled();
     return;
