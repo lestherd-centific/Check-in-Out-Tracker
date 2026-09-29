@@ -775,15 +775,16 @@ function opsEmailBody(issues, descLimit){
 }
 
 function opsComposeUrl(issues){
-  const build = limit => {
-    const q = new URLSearchParams({
-      to: OPS_EMAIL_TO.join(";"),
-      cc: OPS_EMAIL_CC.join(";"),
-      subject: opsEmailSubject(issues),
-      body: opsEmailBody(issues, limit)
-    });
-    return `${OUTLOOK_COMPOSE_URL}?${q.toString()}`;
-  };
+  // Hand-built rather than URLSearchParams: that encodes spaces as "+" the
+  // form-encoding way, and Outlook's compose deep link does not decode "+"
+  // back to a space — every word in the draft arrives glued together with
+  // plus signs. encodeURIComponent uses %20, which it does decode.
+  const build = limit =>
+    OUTLOOK_COMPOSE_URL +
+    "?to=" + encodeURIComponent(OPS_EMAIL_TO.join(";")) +
+    "&cc=" + encodeURIComponent(OPS_EMAIL_CC.join(";")) +
+    "&subject=" + encodeURIComponent(opsEmailSubject(issues)) +
+    "&body=" + encodeURIComponent(opsEmailBody(issues, limit));
 
   let limit = 3000;
   let url = build(limit);
