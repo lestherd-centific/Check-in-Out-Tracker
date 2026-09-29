@@ -60,6 +60,78 @@
   .kit-tooltip b{display:block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#fbcfe8;margin-bottom:3px;}
   .kit-chip:hover .kit-tooltip{opacity:1;visibility:visible;}
 
+  /* --- Check Out: two panes ---------------------------------------------- */
+  /* Left is the catalogue, right is what you're taking. The point of pinning
+     the selection beside the list is that it stays visible while you scroll a
+     long catalogue — on a busy morning the old single column scrolled your own
+     basket off the screen. Below 860px there is no room for two, so they stack
+     and a bar at the bottom carries the summary instead. */
+  .co-panes{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;margin-top:8px;}
+  .co-pane{min-width:0;}
+  .co-pane-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+    font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--sub);margin-bottom:6px;}
+  .co-pane-head .co-pane-sub{font-weight:600;letter-spacing:0;text-transform:none;font-size:11.5px;}
+  .co-pane-left .device-list{max-height:360px;margin-top:0;}
+  .co-pane-right .selected-list{max-height:250px;overflow-y:auto;padding-right:2px;}
+  .co-empty-sel{border:1px dashed var(--border);border-radius:8px;padding:16px 12px;text-align:center;
+    color:var(--sub);font-size:12.5px;line-height:1.5;}
+  @media (max-width:859px){
+    .co-panes{grid-template-columns:minmax(0,1fr);gap:14px;}
+    .co-pane-left .device-list{max-height:300px;}
+  }
+
+  /* --- Check Out: model groups ------------------------------------------- */
+  /* Serials within a model are usually interchangeable, so the group header
+     itself takes the next available one; the caret is there for the rarer case
+     where a specific serial matters. */
+  .dev-group{border-bottom:1px solid var(--border);}
+  .dev-group:last-child{border-bottom:none;}
+  .dev-group-head{display:flex;align-items:center;gap:9px;padding:10px 12px;cursor:pointer;font-size:13px;}
+  .dev-group-head:hover{background:var(--hover-bg);}
+  .dev-group-head.none-left{cursor:default;color:var(--sub);}
+  .dev-group-head.none-left:hover{background:none;}
+  .dev-group-caret{flex-shrink:0;width:20px;height:20px;border-radius:5px;display:flex;align-items:center;
+    justify-content:center;color:var(--sub);font-size:12px;transition:transform .12s ease;}
+  .dev-group-caret:hover{background:var(--border);color:var(--ink);}
+  .dev-group.open .dev-group-caret{transform:rotate(90deg);}
+  .dev-group-name{font-weight:600;flex:1;min-width:0;}
+  .dev-group-count{flex-shrink:0;font-size:11.5px;color:var(--sub);font-weight:600;}
+  .dev-group-count .taken{color:var(--c-violet);}
+  .dev-group-body{border-top:1px solid var(--border);background:var(--hover-bg);}
+  .dev-group-body .device-item{padding-left:34px;}
+
+  /* --- Check Out: session requirements ----------------------------------- */
+  .req-box{border:1px solid var(--border);border-radius:8px;padding:11px 12px;margin-bottom:10px;}
+  .req-top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px;}
+  .req-title{font-size:12.5px;font-weight:600;}
+  .req-score{font-size:11.5px;color:var(--sub);font-weight:600;}
+  .req-bar{height:5px;border-radius:999px;background:var(--border);overflow:hidden;margin-bottom:9px;}
+  .req-fill{height:100%;width:0;background:var(--cond-good);border-radius:999px;transition:width .2s ease;}
+  .req-row{display:flex;align-items:flex-start;gap:8px;padding:4px 0;font-size:12.5px;}
+  .req-dot{flex-shrink:0;width:17px;height:17px;border-radius:50%;border:1.5px solid var(--border);
+    display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:transparent;margin-top:1px;}
+  .req-row.done .req-dot{background:var(--cond-good-bg);border-color:var(--cond-good);color:var(--cond-good);}
+  .req-row.done .req-label{color:var(--cond-good);font-weight:600;}
+  .req-row.none .req-dot{border-color:var(--cond-fair,#d97706);}
+  .req-row.none .req-label{color:var(--cond-fair,#d97706);}
+  .req-label{flex:1;min-width:0;}
+  .req-note{flex-shrink:0;font-size:11.5px;color:var(--sub);}
+
+  /* Narrow screens only: the right pane is below the fold while you pick, so
+     the summary follows you down the page. */
+  .co-mobile-bar{display:none;}
+  @media (max-width:859px){
+    .co-mobile-bar.on{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;align-items:center;gap:10px;
+      padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px));background:var(--panel);
+      border-top:1px solid var(--border);box-shadow:0 -4px 14px rgba(28,27,41,.08);cursor:pointer;}
+    .cmb-pips{display:flex;gap:5px;flex-shrink:0;}
+    .cmb-pip{width:9px;height:9px;border-radius:50%;background:var(--border);}
+    .cmb-pip.done{background:var(--cond-good);}
+    .cmb-pip.none{background:var(--cond-fair,#d97706);}
+    .cmb-text{flex:1;min-width:0;font-size:12.5px;font-weight:600;}
+    .cmb-go{flex-shrink:0;font-size:12px;color:var(--c-violet);font-weight:600;}
+  }
+
   .selected-header{display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;}
   .selected-header .count{font-size:12px;color:var(--sub);font-weight:600;}
   .selected-list{margin-top:6px;display:flex;flex-direction:column;gap:6px;}
@@ -313,11 +385,20 @@
 
     <div class="card" id="co-device-card" style="display:none;">
       <h3>2. Device</h3>
-      <div class="sync-status" style="margin:-4px 0 8px;">Tap a device to select it, then set its condition and add a note if needed.</div>
+      <div class="sync-status" style="margin:-4px 0 8px;">Tap a group to take the next free one, or open it with the arrow to pick a serial. Set condition and notes on the right.</div>
       <input type="text" id="co-device-search" placeholder="Search asset tag, model, or serial…">
       <div class="kit-chip-row" id="co-kit-chips"></div>
-      <div class="device-list" id="co-device-list"></div>
-      <div id="co-selected-wrap"></div>
+      <div class="co-panes">
+        <div class="co-pane co-pane-left">
+          <div class="co-pane-head"><span>Available</span><span class="co-pane-sub" id="co-avail-sub"></span></div>
+          <div class="device-list" id="co-device-list"></div>
+        </div>
+        <div class="co-pane co-pane-right" id="co-pane-right">
+          <div class="co-pane-head"><span>Your selection</span><span class="co-pane-sub" id="co-sel-sub"></span></div>
+          <div id="co-req-wrap"></div>
+          <div id="co-selected-wrap"></div>
+        </div>
+      </div>
     </div>
 
     <div class="card" id="co-destination-card" style="display:none;">
@@ -381,6 +462,12 @@
     so entries from every moderator merge safely without overwriting anyone else's.
   </footer>
 </main>
+
+<!-- Narrow screens only. Carries the session checklist and selection count
+     down the page while the catalogue is being scrolled; tapping it jumps to
+     the selection pane. Hidden entirely at laptop widths, where the right
+     pane is already on screen. -->
+<div class="co-mobile-bar" id="co-mobile-bar"></div>
 
 <!-- Report a device issue. Reachable from the footer on every tab and from the
      Device Issues tab; also opened prefilled when a check-in marks something
@@ -571,6 +658,35 @@ const OPS_EMAIL_GREETING = "Shreya";
 // Everyone who should receive the escalation, in order. See opsComposeUrl for
 // why these end up on one line rather than To + Cc.
 function OPS_EMAIL_RECIPIENTS(){ return [...OPS_EMAIL_TO, ...OPS_EMAIL_CC]; }
+
+// What a session needs, per project. A project with no entry here shows no
+// checklist at all, so new projects can be added one at a time.
+//
+// `match` is tested as a case-insensitive substring of the device's model, not
+// an exact string — "SSD" covers a 4 TB as well as an 8 TB, and "Insta 360"
+// survives the jump from an X5 to whatever replaces it. Matching on the model
+// is the only option the site has: it reads devices from the main Hardware
+// Tracker and that's the field describing what a thing is.
+//
+// One of each turns the row green. There is deliberately no upper bound — two
+// cameras and three mics is a normal session, not an error.
+const SESSION_REQUIREMENTS = {
+  "Sesame": [
+    // A Lenovo does not satisfy this one: Sesame needs a Mac for the software.
+    { label: "MacBook", match: "MacBook" },
+    { label: "SSD",     match: "SSD" },
+    { label: "Chip",    match: "Radio Wave Transmitter" },
+    { label: "Camera",  match: "Insta 360" }
+  ]
+};
+
+function requirementsFor(project){
+  return SESSION_REQUIREMENTS[project] || [];
+}
+
+function modelMatches(model, needle){
+  return String(model || "").toLowerCase().includes(String(needle).toLowerCase());
+}
 
 const AUTH_KEY = "checkinout-auth-v1";
 const STORE_KEY = "checkinout-cache-v1";
@@ -1374,6 +1490,61 @@ document.querySelectorAll(".tab-btn").forEach(btn => {
 // as the Check In panel — rather than one shared value for the whole batch.
 let coSelectedDevices = new Map();
 
+// Model names whose group is open in the left pane. Collapsed is the default:
+// with ten models and forty serials, an expanded list is a wall of near
+// identical rows, and the thing a moderator is usually looking for is "an
+// SSD", not a particular one.
+let coExpandedGroups = new Set();
+
+// Buckets the catalogue by model. Groups with nothing free sink to the bottom
+// for the same reason individual unavailable devices do — a list that opens on
+// rows you can't use is a list you have to scroll past.
+function modelGroups(entries){
+  const by = new Map();
+  entries.forEach(e => {
+    const key = e.device.model || "Unnamed item";
+    if (!by.has(key)) by.set(key, []);
+    by.get(key).push(e);
+  });
+  return [...by.entries()]
+    .map(([model, list]) => ({
+      model,
+      entries: sortByAvailability(list),
+      available: list.filter(e => !e.unavailable).length,
+      total: list.length
+    }))
+    .sort((a, b) => (a.available > 0 ? 0 : 1) - (b.available > 0 ? 0 : 1) ||
+                    a.model.localeCompare(b.model));
+}
+
+// One row per required item for this project. A row counts as met when a
+// matching device is in the basket OR already checked out to you or your
+// partner: somebody who took the MacBook at 8am and came back for the SSD at
+// 9am has a laptop, and a checklist that said otherwise would be lying.
+//
+// `available` is separate from `met` so the UI can tell "you haven't picked
+// one yet" apart from "there isn't one to pick".
+function requirementRows(project, location){
+  const reqs = requirementsFor(project);
+  if (reqs.length === 0) return [];
+  const basket = [...coSelectedDevices.values()].map(r => r.device);
+  const mine = openCheckouts().filter(isMyCheckout);
+  const free = devicesFor(project, location).filter(e => !e.unavailable).map(e => e.device);
+
+  return reqs.map(req => {
+    const fromBasket = basket.filter(d => modelMatches(d.model, req.match)).length;
+    const alreadyOut = mine.filter(c => modelMatches(c.model, req.match)).length;
+    return {
+      label: req.label,
+      match: req.match,
+      fromBasket,
+      alreadyOut,
+      met: fromBasket > 0 || alreadyOut > 0,
+      available: free.some(d => modelMatches(d.model, req.match))
+    };
+  });
+}
+
 function renderProjectOptions(){
   const sel = document.getElementById("co-project");
   const current = sel.value;
@@ -1486,6 +1657,7 @@ function renderDeviceList(){
     destinationCard.style.display = "none";
     detailsCard.style.display = "none";
     document.getElementById("co-kit-chips").innerHTML = "";
+    renderMobileBar([]);
     return;
   }
   deviceCard.style.display = "";
@@ -1493,77 +1665,43 @@ function renderDeviceList(){
   renderSoloBanner();
   const q = document.getElementById("co-device-search").value.trim().toLowerCase();
   const allEntries = devicesFor(project, location);
-  const entries = sortByAvailability(allEntries.filter(e =>
+  const entries = allEntries.filter(e =>
     !q || [e.device.tag, e.device.model, e.device.serial].join(" ").toLowerCase().includes(q)
-  ));
+  );
   renderCoKitChips(allEntries.filter(e => !e.unavailable).map(e => e.device));
   // A device can become unavailable while it is already selected — someone
   // else takes it, or files a report against it, and the next poll brings that
   // in. Drop it from the basket rather than letting it ride through to submit.
   const unavailableIds = new Set(allEntries.filter(e => e.unavailable).map(e => e.device.id));
   [...coSelectedDevices.keys()].forEach(id => { if (unavailableIds.has(id)) coSelectedDevices.delete(id); });
-  const listEl = document.getElementById("co-device-list");
-  if (entries.length === 0){
-    listEl.innerHTML = '<div class="empty-hint">No devices match this project, location, and search.</div>';
 
+  const availableNow = allEntries.filter(e => !e.unavailable).length;
+  document.getElementById("co-avail-sub").textContent =
+    availableNow === 1 ? "1 device" : `${availableNow} devices`;
+
+  const listEl = document.getElementById("co-device-list");
+  const groups = modelGroups(entries);
+
+  if (groups.length === 0){
+    listEl.innerHTML = '<div class="empty-hint">No devices match this project, location, and search.</div>';
   } else {
-    listEl.innerHTML = entries.map(entry => {
-      const d = entry.device;
-      if (entry.unavailable && entry.unavailable.kind === "issue"){
-        const block = entry.unavailable.issue;
-        return `
-      <div class="device-item blocked" data-id="${escapeHtml(d.id)}" data-blocked="1" style="flex-direction:column;align-items:stretch;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-          <div>
-            <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
-            <div class="meta">Serial ${escapeHtml(d.serial)}</div>
-            <div class="blocked-note">${escapeHtml(blockedReason(block))}</div>
-          </div>
-          <span class="pill st-${issueStatusClass(block.status)}">${escapeHtml(block.status || "Open")}</span>
-        </div>
-      </div>`;
-      }
-      if (entry.unavailable && entry.unavailable.kind === "out"){
-        const c = entry.unavailable.checkout;
-        const holder = withPartner(c.modName || "someone", c.partner);
-        const age = outAgeLabel(c);
-        return `
-      <div class="device-item blocked" data-id="${escapeHtml(d.id)}" data-blocked="1" style="flex-direction:column;align-items:stretch;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-          <div>
-            <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
-            <div class="meta">Serial ${escapeHtml(d.serial)}</div>
-            <div class="out-note">Checked out by ${escapeHtml(holder)}${age ? " · " + escapeHtml(age) : ""}</div>
-          </div>
-          <span class="pill out">Out</span>
-        </div>
-      </div>`;
-      }
-      const rec = coSelectedDevices.get(d.id);
-      const selected = !!rec;
-      const condition = rec ? rec.condition : "Good";
-      const rightControls = selected ? `
-          <div class="ci-row-controls">
-            <div class="mini-cond">
-              <div class="mini-cond-choice sel-good ${condition === "Good" ? "selected" : ""}" data-cond="Good">Good</div>
-              <div class="mini-cond-choice sel-fair ${condition === "Fair" ? "selected" : ""}" data-cond="Fair">Fair</div>
-              <div class="mini-cond-choice sel-damaged ${condition === "Damaged" ? "selected" : ""}" data-cond="Damaged">Damaged</div>
-            </div>
-            <button class="ci-notes-toggle ${rec.notes ? "has-note" : ""}" title="Add a note">+</button>
-          </div>` : '<span class="check">✓ selected</span>';
-      const notesBlock = (selected && rec.notesOpen)
-        ? `<textarea class="ci-notes-input" placeholder="Note for this device…">${escapeHtml(rec.notes)}</textarea>`
-        : "";
+    // A search is already a narrowing act — making someone then open each group
+    // to see what they found would undo it.
+    const searching = q.length > 0;
+    listEl.innerHTML = groups.map(g => {
+      const open = searching || coExpandedGroups.has(g.model);
+      const taken = g.entries.filter(e => coSelectedDevices.has(e.device.id)).length;
+      const count = g.available === 0
+        ? "0 available"
+        : `${g.available} available` + (taken ? ` · <span class="taken">${taken} taken</span>` : "");
       return `
-      <div class="device-item ${selected ? "selected" : ""}" data-id="${escapeHtml(d.id)}" style="flex-direction:column;align-items:stretch;">
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
-          <div>
-            <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
-            <div class="meta">Serial ${escapeHtml(d.serial)}</div>
-          </div>
-          ${rightControls}
+      <div class="dev-group${open ? " open" : ""}" data-model="${escapeHtml(g.model)}">
+        <div class="dev-group-head${g.available === 0 ? " none-left" : ""}" data-model="${escapeHtml(g.model)}">
+          <span class="dev-group-caret" data-caret="1">›</span>
+          <span class="dev-group-name">${escapeHtml(g.model)}</span>
+          <span class="dev-group-count">${count}</span>
         </div>
-        ${notesBlock}
+        ${open ? `<div class="dev-group-body">${g.entries.map(coDeviceRowHtml).join("")}</div>` : ""}
       </div>`;
     }).join("");
 
@@ -1578,51 +1716,159 @@ function renderDeviceList(){
       listEl.innerHTML = `<div class="empty-hint">Everything here ${why}.</div>` + listEl.innerHTML;
     }
 
+    // The caret opens the group; the rest of the header takes the next free
+    // one. "I need an SSD" is the common case and "I need that SSD" is rare,
+    // so the common case gets the bigger target.
+    listEl.querySelectorAll(".dev-group-caret").forEach(caret => {
+      caret.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        const model = caret.closest(".dev-group-head").dataset.model;
+        if (coExpandedGroups.has(model)) coExpandedGroups.delete(model);
+        else coExpandedGroups.add(model);
+        renderDeviceList();
+      });
+    });
+
+    listEl.querySelectorAll(".dev-group-head").forEach(head => {
+      head.addEventListener("click", () => {
+        const model = head.dataset.model;
+        const g = groups.find(x => x.model === model);
+        if (!g || g.available === 0) return;
+        const next = g.entries.find(e => !e.unavailable && !coSelectedDevices.has(e.device.id));
+        if (!next){
+          // Every free one is already in the basket — open the group so they
+          // can take one back out rather than leaving the tap doing nothing.
+          coExpandedGroups.add(model);
+          renderDeviceList();
+          return;
+        }
+        coSelectedDevices.set(next.device.id,
+          { device: next.device, condition: "Good", notes: "", notesOpen: false });
+        renderDeviceList();
+      });
+    });
+
     listEl.querySelectorAll(".device-item").forEach(el => {
+      if (el.dataset.blocked) return; // no handlers at all: nothing to click
       const id = el.dataset.id;
       const entry = entries.find(e => e.device.id === id);
       if (!entry) return;
-      const d = entry.device;
-      if (el.dataset.blocked) return; // no handlers at all: nothing to click
-
-      el.addEventListener("click", () => {
+      el.addEventListener("click", (ev) => {
+        ev.stopPropagation();
         if (coSelectedDevices.has(id)) coSelectedDevices.delete(id);
-        else coSelectedDevices.set(id, { device: d, condition: "Good", notes: "", notesOpen: false });
+        else coSelectedDevices.set(id, { device: entry.device, condition: "Good", notes: "", notesOpen: false });
         renderDeviceList();
       });
-
-      el.querySelectorAll(".mini-cond-choice").forEach(btn => {
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const rec = coSelectedDevices.get(id);
-          if (!rec) return;
-          rec.condition = btn.dataset.cond;
-          renderDeviceList();
-        });
-      });
-
-      const notesToggle = el.querySelector(".ci-notes-toggle");
-      if (notesToggle){
-        notesToggle.addEventListener("click", (e) => {
-          e.stopPropagation();
-          const rec = coSelectedDevices.get(id);
-          if (!rec) return;
-          rec.notesOpen = !rec.notesOpen;
-          renderDeviceList();
-        });
-      }
-
-      const notesInput = el.querySelector(".ci-notes-input");
-      if (notesInput){
-        notesInput.addEventListener("click", (e) => e.stopPropagation());
-        notesInput.addEventListener("input", (e) => {
-          const rec = coSelectedDevices.get(id);
-          if (rec) rec.notes = e.target.value;
-        });
-      }
     });
   }
+  const reqRows = renderRequirements(project, location);
   renderSelectedDevices();
+  renderMobileBar(reqRows);
+}
+
+// One row in the left pane. Condition and notes deliberately do NOT live here
+// any more — they belong to devices you've actually taken, so they moved to
+// the selection pane. That keeps this side a plain picker, which is what makes
+// collapsing the groups workable.
+function coDeviceRowHtml(entry){
+  const d = entry.device;
+  if (entry.unavailable && entry.unavailable.kind === "issue"){
+    const block = entry.unavailable.issue;
+    return `
+      <div class="device-item blocked" data-id="${escapeHtml(d.id)}" data-blocked="1" style="flex-direction:column;align-items:stretch;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div>
+            <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
+            <div class="meta">Serial ${escapeHtml(d.serial)}</div>
+            <div class="blocked-note">${escapeHtml(blockedReason(block))}</div>
+          </div>
+          <span class="pill st-${issueStatusClass(block.status)}">${escapeHtml(block.status || "Open")}</span>
+        </div>
+      </div>`;
+  }
+  if (entry.unavailable && entry.unavailable.kind === "out"){
+    const c = entry.unavailable.checkout;
+    const holder = withPartner(c.modName || "someone", c.partner);
+    const age = outAgeLabel(c);
+    return `
+      <div class="device-item blocked" data-id="${escapeHtml(d.id)}" data-blocked="1" style="flex-direction:column;align-items:stretch;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+          <div>
+            <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
+            <div class="meta">Serial ${escapeHtml(d.serial)}</div>
+            <div class="out-note">Checked out by ${escapeHtml(holder)}${age ? " · " + escapeHtml(age) : ""}</div>
+          </div>
+          <span class="pill out">Out</span>
+        </div>
+      </div>`;
+  }
+  const selected = coSelectedDevices.has(d.id);
+  return `
+      <div class="device-item${selected ? " selected" : ""}" data-id="${escapeHtml(d.id)}">
+        <div>
+          <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
+          <div class="meta">Serial ${escapeHtml(d.serial)}</div>
+        </div>
+        <span class="check">✓ selected</span>
+      </div>`;
+}
+
+// Session checklist. Returns the rows it drew so the mobile bar can reuse them
+// rather than recomputing.
+function renderRequirements(project, location){
+  const wrap = document.getElementById("co-req-wrap");
+  const rows = requirementRows(project, location);
+  if (rows.length === 0){ wrap.innerHTML = ""; return rows; }
+  const done = rows.filter(r => r.met).length;
+  const pct = Math.round((done / rows.length) * 100);
+  wrap.innerHTML = `
+    <div class="req-box">
+      <div class="req-top">
+        <span class="req-title">Session kit</span>
+        <span class="req-score">${done} of ${rows.length} ready</span>
+      </div>
+      <div class="req-bar"><div class="req-fill" style="width:${pct}%"></div></div>
+      ${rows.map(r => {
+        // Amber rather than plain grey when nothing matching exists to take:
+        // that's a supply problem, not something the moderator forgot.
+        const cls = r.met ? "done" : (r.available ? "" : "none");
+        const note = r.met
+          ? (r.fromBasket > 0 ? "" : "already out to you")
+          : (r.available ? "" : "none available");
+        return `
+        <div class="req-row ${cls}" data-label="${escapeHtml(r.label)}">
+          <span class="req-dot">✓</span>
+          <span class="req-label">${escapeHtml(r.label)}</span>
+          ${note ? `<span class="req-note">${escapeHtml(note)}</span>` : ""}
+        </div>`;
+      }).join("")}
+    </div>`;
+  return rows;
+}
+
+function renderMobileBar(rows){
+  const bar = document.getElementById("co-mobile-bar");
+  if (!bar) return;
+  const n = coSelectedDevices.size;
+  const visible = document.getElementById("co-device-card").style.display !== "none";
+  if (!visible || (n === 0 && rows.length === 0)){
+    bar.className = "co-mobile-bar";
+    bar.innerHTML = "";
+    return;
+  }
+  const done = rows.filter(r => r.met).length;
+  const pips = rows.map(r =>
+    `<span class="cmb-pip ${r.met ? "done" : (r.available ? "" : "none")}"></span>`).join("");
+  const text = rows.length
+    ? `${n} selected · ${done} of ${rows.length} ready`
+    : `${n} selected`;
+  bar.className = "co-mobile-bar on";
+  bar.innerHTML = `<div class="cmb-pips">${pips}</div>` +
+    `<div class="cmb-text">${escapeHtml(text)}</div><div class="cmb-go">View ›</div>`;
+  bar.onclick = () => {
+    const right = document.getElementById("co-pane-right");
+    if (right) right.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 }
 
 // Shown on the check-out card while nobody is paired. Deliberately a line on
@@ -1650,12 +1896,19 @@ function renderSelectedDevices(){
   const wrap = document.getElementById("co-selected-wrap");
   const detailsCard = document.getElementById("co-details-card");
   const entries = [...coSelectedDevices.entries()]; // [deviceId, {device, condition, notes}]
+  document.getElementById("co-sel-sub").textContent =
+    entries.length === 0 ? "" : `${entries.length} device${entries.length === 1 ? "" : "s"}`;
+
   if (entries.length === 0){
-    wrap.innerHTML = "";
+    wrap.innerHTML = '<div class="co-empty-sel">Nothing selected yet.<br>Tap a group to take the next free one, ' +
+      'or open it with the arrow to pick a serial.</div>';
     detailsCard.style.display = "none";
     updateSubmitEnabled();
     return;
   }
+  // Condition and notes live here rather than in the catalogue: they describe
+  // gear you're actually taking, and keeping them out of the left pane is what
+  // lets those groups collapse.
   wrap.innerHTML = `
     <div class="selected-header">
       <span class="count">${entries.length} device${entries.length === 1 ? "" : "s"} selected</span>
@@ -1663,24 +1916,65 @@ function renderSelectedDevices(){
     </div>
     <div class="selected-list">
       ${entries.map(([id, rec]) => `
-        <div class="selected-row" data-id="${escapeHtml(id)}">
-          <div>
-            <div class="name">${escapeHtml(rec.device.tag)} — ${escapeHtml(rec.device.model)}</div>
-            <div class="meta">Serial ${escapeHtml(rec.device.serial)} · <span class="pill ${rec.condition.toLowerCase()}">${escapeHtml(rec.condition)}</span></div>
+        <div class="selected-row" data-id="${escapeHtml(id)}" style="flex-direction:column;align-items:stretch;gap:7px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <div>
+              <div class="name">${escapeHtml(rec.device.tag)} — ${escapeHtml(rec.device.model)}</div>
+              <div class="meta">Serial ${escapeHtml(rec.device.serial)}</div>
+            </div>
+            <button class="remove-btn" data-id="${escapeHtml(id)}" title="Remove">✕</button>
           </div>
-          <button class="remove-btn" data-id="${escapeHtml(id)}" title="Remove">✕</button>
+          <div class="ci-row-controls">
+            <div class="mini-cond">
+              <div class="mini-cond-choice sel-good ${rec.condition === "Good" ? "selected" : ""}" data-cond="Good">Good</div>
+              <div class="mini-cond-choice sel-fair ${rec.condition === "Fair" ? "selected" : ""}" data-cond="Fair">Fair</div>
+              <div class="mini-cond-choice sel-damaged ${rec.condition === "Damaged" ? "selected" : ""}" data-cond="Damaged">Damaged</div>
+            </div>
+            <button class="ci-notes-toggle ${rec.notes ? "has-note" : ""}" title="Add a note">+</button>
+          </div>
+          ${rec.notesOpen
+            ? `<textarea class="ci-notes-input" placeholder="Note for this device…">${escapeHtml(rec.notes)}</textarea>`
+            : ""}
         </div>`).join("")}
     </div>`;
+
   document.getElementById("co-clear-all").addEventListener("click", () => {
     coSelectedDevices.clear();
     renderDeviceList();
   });
-  wrap.querySelectorAll(".remove-btn").forEach(btn => {
-    btn.addEventListener("click", () => {
-      coSelectedDevices.delete(btn.dataset.id);
+
+  wrap.querySelectorAll(".selected-row").forEach(row => {
+    const id = row.dataset.id;
+    row.querySelector(".remove-btn").addEventListener("click", () => {
+      coSelectedDevices.delete(id);
       renderDeviceList();
     });
+    row.querySelectorAll(".mini-cond-choice").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const rec = coSelectedDevices.get(id);
+        if (!rec) return;
+        rec.condition = btn.dataset.cond;
+        renderDeviceList();
+      });
+    });
+    const toggle = row.querySelector(".ci-notes-toggle");
+    if (toggle){
+      toggle.addEventListener("click", () => {
+        const rec = coSelectedDevices.get(id);
+        if (!rec) return;
+        rec.notesOpen = !rec.notesOpen;
+        renderDeviceList();
+      });
+    }
+    const notes = row.querySelector(".ci-notes-input");
+    if (notes){
+      notes.addEventListener("input", (e) => {
+        const rec = coSelectedDevices.get(id);
+        if (rec) rec.notes = e.target.value;
+      });
+    }
   });
+
   detailsCard.style.display = "";
   updateSubmitEnabled();
 }
@@ -2305,7 +2599,7 @@ const ONBOARD_STEPS = [
   {
     label: "Settings", title: "Camera setting format",
     items: [
-      "Memory card is empty and not near its storage limit",
+      "Memory card has at least 30–40% free space<span class=\"onb-sub\">The camera takes a 1 TB SD card — check it before the session, not during</span>",
       "Battery is at least 80% before starting a session",
       // The nav path sits under its own bullet in full-strength text — it was
       // getting lost as a grey caption underneath the whole step.
