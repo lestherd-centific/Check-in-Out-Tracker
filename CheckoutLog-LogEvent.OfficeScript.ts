@@ -39,9 +39,10 @@
 // drives check-in stays intact. Only a Moderation shift carries a partner; an
 // Uploader row always has it blank.
 //
-// sessionRole is what this person is doing this shift: "Moderation" (running
-// a session, normally paired) or "Uploader" (uploading into One Data, which
-// is a solo job by nature). Deliberately NOT the same as the `role` column in
+// sessionRole is what this person is doing this shift: "Moderating" (running
+// a session, normally paired) or "Uploading" (moving session data into One
+// Data, which is a solo job by nature). Activity words rather than person
+// words, because the same moderator does both on the same day. Deliberately NOT the same as the `role` column in
 // Credentials, which is the roster role (Mod/Admin) — two different meanings
 // of "role" in one system is how somebody eventually reads the wrong one.
 // It is recorded per row rather than per person: the same moderator checks
@@ -68,7 +69,7 @@ function main(
   notes: string,
   destination: string, // "" when not specified
   partner: string,     // "" when working alone
-  sessionRole: string  // "Moderation" | "Uploader"
+  sessionRole: string  // "Moderating" | "Uploading"
 ) {
   const table = workbook.getTable("CheckoutLog");
 

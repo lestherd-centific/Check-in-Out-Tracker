@@ -745,11 +745,17 @@ let authInfo = JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); // {name, l
 // The id is what gets written to the log's sessionRole column, so changing one
 // of these strings changes what lands in Excel from that point on — old rows
 // keep the old wording.
+// Activity words, not person words: the modal asks what you're doing today,
+// and the same person moderates in the morning and uploads in the afternoon.
+// Naming these as people would also collide with the Credentials table's own
+// `role` column, which really is a job title (Mod/Admin).
 const SESSION_ROLES = [
-  { id: "Moderation", label: "Moderation",
-    sub: "Primary and secondary mods conducting a session.", needsPartner: true },
-  { id: "Uploader", label: "Uploader",
-    sub: "Uploading data into One Data. No partner needed \u2014 this role stands on its own.", needsPartner: false }
+  { id: "Moderating", label: "Moderating",
+    sub: "Running a data-collection session in the field. Normally two mods, a primary and a " +
+         "secondary \u2014 so you'll be asked who you're paired with.", needsPartner: true },
+  { id: "Uploading", label: "Uploading",
+    sub: "Transferring session data into One Data. A solo job, so no partner is recorded.",
+    needsPartner: false }
 ];
 
 const ROLE_KEY = "checkinout-role-v1";
