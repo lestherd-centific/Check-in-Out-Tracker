@@ -322,6 +322,17 @@
   /* Header entry point. Carries the damage colour rather than the violet
      primary, so it reads as "something is wrong" rather than as the main
      action of the page. */
+  .role-choices{display:flex;flex-direction:column;gap:8px;}
+  .role-choice{border:1.5px solid var(--border);border-radius:9px;padding:11px 13px;cursor:pointer;}
+  .role-choice:hover{background:var(--hover-bg);}
+  .role-choice.selected{border-color:var(--c-violet);background:var(--c-violet-soft);}
+  .role-choice .rc-label{font-weight:700;font-size:13.5px;}
+  .role-choice.selected .rc-label{color:var(--c-violet);}
+  .role-choice .rc-sub{font-size:12px;color:var(--sub);margin-top:2px;line-height:1.45;}
+  .role-btn{border:1px solid var(--c-violet);background:var(--c-violet-soft);color:var(--c-violet);
+    border-radius:7px;padding:3px 9px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .role-btn:hover{background:var(--c-violet);color:#fff;}
+  .role-chip{font-weight:700;}
   .pair-note{font-size:11.5px;font-weight:600;color:var(--cond-fair);}
   .pair-name{font-weight:700;}
   .solo-banner{display:flex;align-items:flex-start;gap:8px;font-size:12.5px;color:var(--cond-fair);background:var(--cond-fair-bg);border-radius:8px;padding:9px 11px;margin-bottom:12px;line-height:1.5;}
@@ -598,17 +609,25 @@
   </div>
 </div>
 
-<div class="modal-backdrop" id="partnerBackdrop">
+<!-- Role and partner in one modal. They were two separate things and it made
+     no sense: the partner only exists because of the role, so changing one
+     without seeing the other was how people ended up paired on an upload run. -->
+<div class="modal-backdrop" id="roleBackdrop">
   <div class="modal">
-    <h3>Who are you working with?</h3>
-    <div class="sync-status" style="margin:-8px 0 12px;">Changing this affects everything recorded from now on.
-      Anything already logged keeps the partner it was filed with.</div>
-    <label style="margin-top:0;">Partner</label>
-    <select id="partner-select"><option value="">Working alone</option></select>
-    <div id="partner-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:6px;min-height:16px;"></div>
+    <h3 id="role-title">What are you doing today?</h3>
+    <div class="sync-status" style="margin:-8px 0 12px;" id="role-sub">This is recorded on everything you check in or out
+      from now on. Anything already logged keeps the role it was filed with.</div>
+    <div class="role-choices" id="role-choices"></div>
+    <div id="role-partner-wrap" style="display:none;">
+      <label>Working with <span style="font-weight:400;">(optional)</span></label>
+      <select id="partner-select"><option value="">Working alone</option></select>
+      <div class="sync-status" style="margin-top:5px;">Pick the moderator you're paired with for this shift. Leave it as
+        Working alone if you're on your own — it's allowed, it just gets recorded.</div>
+    </div>
+    <div id="role-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:6px;min-height:16px;"></div>
     <div style="display:flex;gap:8px;margin-top:14px;">
-      <button id="partner-cancel" style="flex:1;">Cancel</button>
-      <button class="primary" id="partner-save" style="flex:1;">Save</button>
+      <button id="role-cancel" style="flex:1;">Cancel</button>
+      <button class="primary" id="role-save" style="flex:1;">Save</button>
     </div>
   </div>
 </div>
@@ -620,10 +639,6 @@
     <div id="auth-login-form" style="display:none;">
       <label style="margin-top:0;">Login</label>
       <input type="text" id="auth-login-input" placeholder="Enter your login" autocomplete="off">
-      <label>Working with <span style="font-weight:400;">(optional)</span></label>
-      <select id="auth-partner-select"><option value="">Working alone</option></select>
-      <div class="sync-status" style="margin-top:5px;">Pick the moderator you're paired with for this shift. Leave it as
-        Working alone if you're on your own — it's allowed, it just gets recorded.</div>
       <div id="auth-login-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:6px;min-height:16px;"></div>
       <div style="margin-top:14px;">
         <button class="primary" id="auth-login-submit" style="width:100%;">Enter</button>
@@ -723,6 +738,39 @@ let authInfo = JSON.parse(localStorage.getItem(AUTH_KEY) || "null"); // {name, l
 // or "" for working alone. Session-scoped rather than remembered like the
 // login: pairings change shift to shift, so closing the browser should forget
 // it, while a mid-shift refresh should not.
+// What a moderator is doing this shift. Moderation runs a session and is
+// normally paired; uploading is a solo job by its nature, so pairing is not
+// offered for it at all rather than being offered and left blank.
+//
+// The id is what gets written to the log's sessionRole column, so changing one
+// of these strings changes what lands in Excel from that point on — old rows
+// keep the old wording.
+const SESSION_ROLES = [
+  { id: "Moderation", label: "Moderation",
+    sub: "Primary and secondary mods conducting a session.", needsPartner: true },
+  { id: "Uploader", label: "Uploader",
+    sub: "Uploading data into One Data. No partner needed \u2014 this role stands on its own.", needsPartner: false }
+];
+
+const ROLE_KEY = "checkinout-role-v1";
+let sessionRole = (() => {
+  try { return sessionStorage.getItem(ROLE_KEY) || ""; } catch (err){ return ""; }
+})();
+
+function roleDef(id){ return SESSION_ROLES.find(r => r.id === id) || null; }
+function roleNeedsPartner(id){ const r = roleDef(id || sessionRole); return !!(r && r.needsPartner); }
+
+function setSessionRole(id){
+  sessionRole = String(id || "");
+  try {
+    if (sessionRole) sessionStorage.setItem(ROLE_KEY, sessionRole);
+    else sessionStorage.removeItem(ROLE_KEY);
+  } catch (err){ /* non-fatal */ }
+  // A role that doesn't pair can't carry a partner. Leaving a stale one would
+  // put a second name on an upload row that nobody was actually working with.
+  if (!roleNeedsPartner()) setPartner("");
+}
+
 const PARTNER_KEY = "checkinout-partner-v1";
 let partnerName = (() => {
   try { return sessionStorage.getItem(PARTNER_KEY) || ""; } catch (err){ return ""; }
@@ -1118,12 +1166,18 @@ function renderAuthStatus(){
   if (authInfo){
     // The header is where working-alone is surfaced: always visible, never a
     // dialog. A warning people have to dismiss is one they learn to dismiss.
-    const pairing = partnerName
-      ? `<span class="pair-name">+ ${escapeHtml(partnerName)}</span>`
-      : `<span class="pair-note">⚠ working alone</span>`;
-    el.innerHTML = `Signed in as <b>${escapeHtml(authInfo.name || authInfo.login)}</b> ${pairing} ` +
-      `· <button id="partner-btn" class="link-btn">Change</button> · <button id="logout-btn" class="link-btn">Sign out</button>`;
-    document.getElementById("partner-btn").addEventListener("click", openPartnerModal);
+    // Only a role that pairs can be "working alone" — on an upload run that is
+    // simply what the job is, and a warning that fires on every correct action
+    // is one people stop reading.
+    const pairing = !roleNeedsPartner()
+      ? ""
+      : partnerName
+        ? ` <span class="pair-name">+ ${escapeHtml(partnerName)}</span>`
+        : ` <span class="pair-note">⚠ working alone</span>`;
+    const roleChip = sessionRole ? ` · <span class="role-chip">${escapeHtml(sessionRole)}</span>` : "";
+    el.innerHTML = `Signed in as <b>${escapeHtml(authInfo.name || authInfo.login)}</b>${roleChip}${pairing} ` +
+      `· <button id="role-btn" class="role-btn">Change role</button> · <button id="logout-btn" class="link-btn">Sign out</button>`;
+    document.getElementById("role-btn").addEventListener("click", () => openRoleModal(false));
     document.getElementById("logout-btn").addEventListener("click", () => {
       localStorage.removeItem(AUTH_KEY);
       location.reload();
@@ -1133,17 +1187,61 @@ function renderAuthStatus(){
   }
 }
 
-function openPartnerModal(){
-  const sel = document.getElementById("partner-select");
-  fillPartnerOptions(sel, authInfo && authInfo.login, partnerName);
-  document.getElementById("partner-error").textContent = "";
-  document.getElementById("partnerBackdrop").classList.add("open");
+// The role currently picked inside the modal, which is not the live one until
+// Save — so backing out of a half-made change leaves the session as it was.
+let rolePending = "";
+let roleFirstRun = false;
+
+function renderRoleChoices(){
+  document.getElementById("role-choices").innerHTML = SESSION_ROLES.map(r => `
+    <div class="role-choice${rolePending === r.id ? " selected" : ""}" data-role="${escapeHtml(r.id)}">
+      <div class="rc-label">${escapeHtml(r.label)}</div>
+      <div class="rc-sub">${escapeHtml(r.sub)}</div>
+    </div>`).join("");
+  document.querySelectorAll("#role-choices .role-choice").forEach(el => {
+    el.addEventListener("click", () => {
+      rolePending = el.dataset.role;
+      document.getElementById("role-error").textContent = "";
+      renderRoleChoices();
+    });
+  });
+  // The partner picker belongs to the role, so it appears and disappears with
+  // it rather than sitting there greyed out.
+  const wrap = document.getElementById("role-partner-wrap");
+  wrap.style.display = roleNeedsPartner(rolePending) ? "" : "none";
 }
-function closePartnerModal(){ document.getElementById("partnerBackdrop").classList.remove("open"); }
-document.getElementById("partner-cancel").addEventListener("click", closePartnerModal);
-document.getElementById("partner-save").addEventListener("click", () => {
-  setPartner(document.getElementById("partner-select").value);
-  closePartnerModal();
+
+function openRoleModal(firstRun){
+  roleFirstRun = !!firstRun;
+  rolePending = sessionRole || "";
+  fillPartnerOptions(document.getElementById("partner-select"), authInfo && authInfo.login, partnerName);
+  document.getElementById("role-error").textContent = "";
+  document.getElementById("role-title").textContent =
+    roleFirstRun ? "What are you doing today?" : "Change role";
+  // No way out on the first run: everything recorded from here carries the
+  // role, so there is no sensible default to fall back to.
+  document.getElementById("role-cancel").style.display = roleFirstRun ? "none" : "";
+  renderRoleChoices();
+  document.getElementById("roleBackdrop").classList.add("open");
+}
+function closeRoleModal(){ document.getElementById("roleBackdrop").classList.remove("open"); }
+
+document.getElementById("role-cancel").addEventListener("click", closeRoleModal);
+document.getElementById("role-save").addEventListener("click", () => {
+  const errEl = document.getElementById("role-error");
+  if (!rolePending){ errEl.textContent = "Pick what you're doing today."; return; }
+  const chosen = roleNeedsPartner(rolePending) ? document.getElementById("partner-select").value : "";
+  // The list can't exclude you until you've said who you are, so the check
+  // happens here rather than being designed out of the dropdown.
+  if (chosen && authInfo && chosen === (authInfo.name || authInfo.login)){
+    errEl.textContent = "You can't pair with yourself — pick someone else, or leave it as Working alone.";
+    return;
+  }
+  setSessionRole(rolePending);
+  if (roleNeedsPartner()) setPartner(chosen);
+  closeRoleModal();
+  renderAuthStatus();
+  renderAll();
 });
 
 function attemptLogin(){
@@ -1154,22 +1252,16 @@ function attemptLogin(){
     errEl.textContent = "Login not recognized — check with an admin if this seems wrong.";
     return;
   }
-  const chosen = document.getElementById("auth-partner-select").value;
-  // The list can't exclude you until you've said who you are, so the check
-  // happens here rather than being designed out of the dropdown.
-  if (chosen && chosen === (match.name || match.login)){
-    errEl.textContent = "You can't pair with yourself — pick someone else, or leave it as Working alone.";
-    return;
-  }
   authInfo = match;
   localStorage.setItem(AUTH_KEY, JSON.stringify(authInfo));
-  setPartner(chosen);
   errEl.textContent = "";
   input.value = "";
   hideAuthGate();
   renderAuthStatus();
   renderAll();
-  maybeShowOnboarding();
+  // Role next, partner inside it. The device checklist no longer fires here —
+  // it belongs at the first check-out, when somebody actually has gear in hand.
+  openRoleModal(true);
 }
 document.getElementById("auth-login-submit").addEventListener("click", attemptLogin);
 document.getElementById("auth-login-input").addEventListener("keydown", e => { if (e.key === "Enter") attemptLogin(); });
@@ -1189,13 +1281,15 @@ function evaluateAuthGate(){
   if (credentialsList.length > 0){
     document.getElementById("auth-login-loading").style.display = "none";
     document.getElementById("auth-login-form").style.display = "";
-    fillPartnerOptions(document.getElementById("auth-partner-select"), null,
-                       document.getElementById("auth-partner-select").value || partnerName);
   }
-  if (!authInfo) showAuthGate(); else hideAuthGate();
-  // Covers the remembered-login case: someone reopens the site already signed
-  // in, so attemptLogin() never runs but it's still a fresh session.
-  if (authInfo) maybeShowOnboarding();
+  if (!authInfo){ showAuthGate(); return; }
+  hideAuthGate();
+  // Covers the remembered-login case: the login persists across days but the
+  // role does not, so somebody reopening the site is asked what they're doing
+  // today even though attemptLogin() never runs.
+  if (!sessionRole && !document.getElementById("roleBackdrop").classList.contains("open")){
+    openRoleModal(true);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1883,7 +1977,8 @@ function renderMobileBar(rows){
 function renderSoloBanner(){
   const card = document.getElementById("co-device-card");
   let el = document.getElementById("solo-banner");
-  if (partnerName){
+  // Uploading alone is the job, not an oversight.
+  if (partnerName || !roleNeedsPartner()){
     if (el) el.remove();
     return;
   }
@@ -1894,7 +1989,7 @@ function renderSoloBanner(){
     el.innerHTML = '<span>⚠</span><span>You\'re recorded as working alone. If someone is with you, ' +
       '<button class="link-btn" id="solo-banner-set">set your partner</button> so the log shows both of you.</span>';
     card.insertBefore(el, card.firstChild);
-    document.getElementById("solo-banner-set").addEventListener("click", openPartnerModal);
+    document.getElementById("solo-banner-set").addEventListener("click", () => openRoleModal(false));
   }
 }
 
@@ -1996,9 +2091,13 @@ function updateSubmitEnabled(){
   }
 }
 
-document.getElementById("co-submit").addEventListener("click", async () => {
+document.getElementById("co-submit").addEventListener("click", () => {
   if (coSelectedDevices.size === 0 || submitting) return;
   if (!authInfo){ showAuthGate(); return; }
+  requireChecklistThen(doCheckout);
+});
+
+async function doCheckout(){
   const project = document.getElementById("co-project").value;
   const location = document.getElementById("co-location").value;
   const destination = getSelectedDestination();
@@ -2063,7 +2162,7 @@ document.getElementById("co-submit").addEventListener("click", async () => {
       id: "evt-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
       checkoutId: "co-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
       eventType: "checkout", ts: new Date().toLocaleString(),
-      modName: authInfo.name || authInfo.login, partner: partnerName,
+      modName: authInfo.name || authInfo.login, partner: partnerName, sessionRole: sessionRole,
       deviceId: d.id, tag: d.tag, model: d.model, serial: d.serial,
       project, location, destination, condition: rec.condition, notes: rec.notes.trim()
     };
@@ -2113,7 +2212,8 @@ document.getElementById("co-submit").addEventListener("click", async () => {
   }
   setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
   renderAll();
-});
+}
+
 
 // ---------------------------------------------------------------------------
 // CHECK IN panel
@@ -2365,7 +2465,7 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
       checkoutId, eventType: "checkin", ts: new Date().toLocaleString(),
       // Recorded as of the check-in, which may be a different pairing from the
       // one the equipment went out with — that is the accurate thing to store.
-      modName: authInfo.name || authInfo.login, partner: partnerName,
+      modName: authInfo.name || authInfo.login, partner: partnerName, sessionRole: sessionRole,
       deviceId: c.deviceId, tag: c.tag, model: c.model, serial: c.serial,
       project: c.project, location: c.location, destination: c.destination || "",
       condition: rec.condition, notes: rec.notes.trim()
@@ -2547,7 +2647,11 @@ async function postEvent(event){
     // Both names on the one row. Writing the event twice, once per mod,
     // would double the log and break the checkoutId pairing that check-in
     // depends on.
-    partner: event.partner || ""
+    partner: event.partner || "",
+    // What this person was doing when the row was written, not who they are:
+    // the same moderator checks gear out as Moderation in the morning and as
+    // Uploader in the afternoon, and both rows should say so.
+    sessionRole: event.sessionRole || ""
   }, "Log event");
   if (!result.ok) return { ok: false, unknown: !!result.unknown,
     message: result.unknown
@@ -2661,11 +2765,20 @@ function openOnboarding(mode){
 function closeOnboarding(){
   document.getElementById("onbBackdrop").classList.remove("open");
 }
-// Only opens on the once-per-session pass; the "?" path calls openOnboarding
-// directly. Safe to call repeatedly — the poll loop does.
-function maybeShowOnboarding(){
-  if (!authInfo || onbSeenThisSession()) return;
+// Runs `next` once the checklist has been satisfied, which is immediately in
+// most cases.
+//
+// The checks are about equipment in hand — memory card space, battery level,
+// visible damage — so they belong at the moment somebody takes gear out, not
+// at sign-in. Sign-in can be hours earlier, and an Uploader never picks up a
+// camera at all, so showing them camera checks was pure noise.
+let onbPendingAction = null;
+
+function requireChecklistThen(next){
+  if (!authInfo) { showAuthGate(); return; }
+  if (!roleNeedsPartner() || onbSeenThisSession()){ next(); return; }
   if (document.getElementById("onbBackdrop").classList.contains("open")) return;
+  onbPendingAction = next;
   openOnboarding("required");
 }
 
@@ -2743,6 +2856,13 @@ document.getElementById("onbNext").addEventListener("click", () => {
   if (onbIndex < ONBOARD_STEPS.length - 1){ onbIndex++; renderOnboarding(); return; }
   onbMarkSeen();
   closeOnboarding();
+  // Whatever the checklist interrupted now goes ahead, so a moderator who
+  // tapped Check out gets their check-out rather than having to tap again.
+  if (onbMode === "required" && onbPendingAction){
+    const next = onbPendingAction;
+    onbPendingAction = null;
+    next();
+  }
 });
 document.getElementById("onbClose").addEventListener("click", () => {
   if (onbMode === "review") closeOnboarding();
