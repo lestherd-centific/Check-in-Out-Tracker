@@ -144,6 +144,10 @@
   .selected-row .meta{color:var(--sub);font-size:11.5px;}
   .selected-row .remove-btn{border:none;background:none;color:var(--c-violet);cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;}
   .selected-row .remove-btn:hover{color:var(--cond-damaged);}
+  /* Where a pre-selected condition came from. Stated rather than asserted, so
+     nobody has to guess why the app picked Fair for them. */
+  .carried-note{font-size:11.5px;line-height:1.45;color:var(--cond-fair);}
+  .note-required{font-size:11.5px;color:var(--cond-damaged);font-weight:600;margin-top:2px;}
 
   .cond-choices{display:flex;gap:8px;margin-top:6px;}
   .cond-choice{flex:1;text-align:center;padding:9px 4px;border-radius:7px;border:1px solid var(--border);cursor:pointer;font-size:12.5px;font-weight:600;color:var(--sub);}
@@ -309,6 +313,8 @@
   .pill.st-open{background:var(--cond-damaged-bg);color:var(--cond-damaged);}
   .pill.st-review{background:var(--cond-fair-bg);color:var(--cond-fair);}
   .pill.st-closed{background:var(--cond-good-bg);color:var(--cond-good);}
+  /* Deliberately grey rather than green: retired is an ending, not a success. */
+  .pill.st-retired{background:var(--border);color:var(--sub);}
   .ci-group-head{font-size:12px;font-weight:700;color:var(--sub);text-transform:uppercase;letter-spacing:.04em;margin:16px 0 4px;}
   .ci-group-head:first-child{margin-top:0;}
   .ci-group-hint{font-size:11.5px;color:var(--sub);margin-bottom:8px;}
@@ -532,7 +538,7 @@
 
       <div class="onb-tip" style="margin-top:14px;">
         <span>✦</span>
-        <span>A reported device is held out of check-out until the Audit Lead marks it Resolved or Replaced.</span>
+        <span>A reported device is held out of check-out until the Audit Lead marks it Resolved.</span>
       </div>
       <div id="issue-error" style="color:var(--cond-damaged);font-size:12.5px;margin-top:8px;min-height:14px;"></div>
     </div>
@@ -961,8 +967,8 @@ function opsEmailBody(issues, descLimit){
     issues.map(blockFor).join("\n\n----------\n\n"),
     "",
     many
-      ? "They're logged in the Device Issue Report and stay out of check-out until the Field Equipment Audit Lead marks each one Resolved or Replaced."
-      : "It's logged in the Device Issue Report and stays out of check-out until the Field Equipment Audit Lead marks it Resolved or Replaced.",
+      ? "They're logged in the Device Issue Report and stay out of check-out until the Field Equipment Audit Lead marks each one Resolved."
+      : "It's logged in the Device Issue Report and stays out of check-out until the Field Equipment Audit Lead marks it Resolved.",
     "",
     "Thanks,",
     me,
@@ -1425,13 +1431,31 @@ function mapIssueRow(r){
   return out;
 }
 
-// Open and In Review hold a device out of service; Resolved and Replaced
-// release it. An unrecognised or blank status is treated as unresolved — if
-// somebody types something odd into the column, erring towards holding the
-// device back is the safer of the two mistakes.
-function issueIsResolved(status){
-  const s = String(status || "").toLowerCase();
-  return s === "resolved" || s === "replaced";
+// Four statuses, and only ONE of them lets a device back into circulation:
+//
+//   Open, In Review  — being dealt with. Device withheld.
+//   Resolved         — fixed and re-tested. Device released. The only release.
+//   Retired          — written off, not coming back. Device withheld forever,
+//                      but the report is closed so it stops sitting in the
+//                      triage list for something nobody will ever action.
+//
+// Retired replaces the old "Replaced" status, which released the device — so a
+// camera that had been written off and swapped out quietly became selectable
+// again. Releasing a device is now something you can only do deliberately, by
+// saying it works.
+//
+// An unrecognised or blank status is treated as outstanding: if somebody types
+// something odd into the column, holding the device back is the safer of the
+// two mistakes.
+function issueReleasesDevice(status){
+  return String(status || "").toLowerCase() === "resolved";
+}
+function issueIsRetired(status){
+  return String(status || "").toLowerCase() === "retired";
+}
+// Still needing somebody to do something: not fixed, not written off.
+function issueIsOutstanding(status){
+  return !issueReleasesDevice(status) && !issueIsRetired(status);
 }
 
 async function loadIssues(){
@@ -1499,7 +1523,8 @@ function openDeviceIds(){ return new Set(openCheckouts().map(c => c.deviceId).fi
 
 // deviceRef -> the unresolved report holding that device out of service.
 //
-// Any report that isn't Resolved or Replaced blocks, however old, and a report
+// Any report that isn't Resolved blocks, however old — including a Retired
+// one, which blocks permanently by design. A report
 // on something the tracker doesn't hold (blank Device Ref) blocks nothing,
 // because there is no device to withhold. Later rows win, so the note a mod
 // sees is the most recent one — Excel returns rows oldest-first.
@@ -1510,7 +1535,7 @@ function openDeviceIds(){ return new Set(openCheckouts().map(c => c.deviceId).fi
 function blockedDeviceMap(){
   const m = new Map();
   deviceIssues.forEach(r => {
-    if (!r.deviceRef || issueIsResolved(r.status)) return;
+    if (!r.deviceRef || issueReleasesDevice(r.status)) return;
     m.set(r.deviceRef, r);
   });
   return m;
@@ -1518,6 +1543,7 @@ function blockedDeviceMap(){
 
 function blockedReason(issue){
   const status = (issue.status || "Open").toLowerCase();
+  if (status === "retired") return "Retired — written off, not returning to the field";
   return status === "in review"
     ? "Out of service — reported issue, in review"
     : "Out of service — issue reported, not yet reviewed";
@@ -1561,6 +1587,86 @@ function sortByAvailability(entries){
 // Kept for the callers that only want what's actually selectable.
 function availableDevicesFor(project, location){
   return devicesFor(project, location).filter(e => !e.unavailable).map(e => e.device);
+}
+
+// The condition a device was last returned in, when that's worth carrying
+// forward to its next check-out.
+//
+// Only FAIR carries. Good is the default anyway, and Damaged deliberately does
+// not: a damaged return files an issue report, which blocks the device
+// outright, so the only way a damaged device becomes selectable again is that
+// somebody repaired it and marked the report Resolved — at which point its last
+// recorded condition is stale and pre-selecting Damaged would be wrong. Working
+// that out would mean comparing timestamps across two workbooks whose clocks
+// aren't comparable (local time here, Pacific there), so the rule sidesteps it.
+//
+// Fair has no report to resolve it, so it persists honestly until a moderator
+// actively says the device is Good again — which is what Fair ought to mean.
+// Before this, a dented tripod reset to Good on every cycle and never
+// accumulated any history at all.
+//
+// Rows arrive from Excel oldest-first, so the last match in array order is the
+// most recent. Optimistic local appends are unshifted to the front instead, so
+// they're tracked separately and always win.
+function lastCheckinFor(deviceId){
+  let fromServer = null;
+  let fromLocal = null;
+  checkoutLog.forEach(e => {
+    if (e.eventType !== "checkin" || e.deviceId !== deviceId) return;
+    if (e._local){
+      if (!fromLocal || (e._addedAt || 0) >= (fromLocal._addedAt || 0)) fromLocal = e;
+    } else {
+      fromServer = e;
+    }
+  });
+  return fromLocal || fromServer;
+}
+
+// The check-in event worth carrying forward, or null. Returns the whole event
+// so the UI can say where the condition came from rather than asserting it.
+function carriedCondition(deviceId){
+  const last = lastCheckinFor(deviceId);
+  if (!last || String(last.condition) !== "Fair") return null;
+  return last;
+}
+
+// A return defaults to the condition the device went OUT in, not to Good:
+// "nothing changed since I picked it up" is the common case, and resetting to
+// Good every time is how a Fair device quietly became Good again.
+function newReturn(checkout){
+  const start = checkout.condition || "Good";
+  return { event: checkout, condition: start, baseCondition: start,
+           notes: "", notesOpen: false };
+}
+
+// A new basket entry, pre-filled from whatever the device was last returned in.
+function newSelection(device){
+  const carried = carriedCondition(device.id);
+  const start = carried ? "Fair" : "Good";
+  return { device, condition: start, baseCondition: start, notes: "", notesOpen: false,
+           carriedFrom: carried || null };
+}
+
+// Fair and Damaged both have to say why. Damaged matters most: its note becomes
+// the description on the auto-filed issue report and in the e-mail to
+// operations, so a blank one produced a report that said nothing.
+const CONDITIONS_NEEDING_NOTE = ["Fair", "Damaged"];
+function conditionNeedsNote(condition){
+  return CONDITIONS_NEEDING_NOTE.indexOf(String(condition)) !== -1;
+}
+
+// ...but only when the moderator CHANGED it. A note records new information.
+// A tripod that came back Fair last week and is still Fair today already has
+// its explanation on the row above — making someone retype it every cycle
+// teaches them to type "same" and the note stops meaning anything.
+//
+// Every record carries the condition it started on: Good for a fresh device,
+// the carried-forward Fair for a known-scuffed one, and for a return, whatever
+// it went out as. Differ from that and you have to say why.
+function recNeedsNote(rec){
+  if (!rec || !conditionNeedsNote(rec.condition)) return false;
+  if (rec.condition === (rec.baseCondition || "Good")) return false;
+  return !String(rec.notes || "").trim();
 }
 
 // "2h" / "3d", matching how long a device has been out.
@@ -1763,7 +1869,7 @@ function renderCoKitChips(allAvailable){
         group.devices.forEach(d => coSelectedDevices.delete(d.id));
       } else {
         group.devices.forEach(d => {
-          if (!coSelectedDevices.has(d.id)) coSelectedDevices.set(d.id, { device: d, condition: "Good", notes: "", notesOpen: false });
+          if (!coSelectedDevices.has(d.id)) coSelectedDevices.set(d.id, newSelection(d));
         });
       }
       renderDeviceList();
@@ -1862,7 +1968,7 @@ function renderDeviceList(){
       el.addEventListener("click", (ev) => {
         ev.stopPropagation();
         if (coSelectedDevices.has(id)) coSelectedDevices.delete(id);
-        else coSelectedDevices.set(id, { device: entry.device, condition: "Good", notes: "", notesOpen: false });
+        else coSelectedDevices.set(id, newSelection(entry.device));
         renderDeviceList();
       });
     });
@@ -1909,12 +2015,16 @@ function coDeviceRowHtml(entry){
       </div>`;
   }
   const selected = coSelectedDevices.has(d.id);
+  // Visible before you choose, which is the moment it earns its place: with two
+  // free tripods you take the clean one and leave the dented one.
+  const carried = carriedCondition(d.id);
   return `
       <div class="device-item${selected ? " selected" : ""}" data-id="${escapeHtml(d.id)}">
         <div>
           <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
           <div class="meta">Serial ${escapeHtml(d.serial)}</div>
         </div>
+        ${carried ? '<span class="pill fair">Fair</span>' : ""}
         <span class="check">✓ selected</span>
       </div>`;
 }
@@ -2031,6 +2141,7 @@ function renderSelectedDevices(){
             </div>
             <button class="remove-btn" data-id="${escapeHtml(id)}" title="Remove">✕</button>
           </div>
+          ${rec.carriedFrom ? `<div class="carried-note">Returned Fair by ${escapeHtml(withPartner(rec.carriedFrom.modName, rec.carriedFrom.partner))}, ${escapeHtml(String(rec.carriedFrom.ts).split(",")[0])}${rec.carriedFrom.notes ? ` · “${escapeHtml(rec.carriedFrom.notes)}”` : ""}</div>` : ""}
           <div class="ci-row-controls">
             <div class="mini-cond">
               <div class="mini-cond-choice sel-good ${rec.condition === "Good" ? "selected" : ""}" data-cond="Good">Good</div>
@@ -2039,6 +2150,9 @@ function renderSelectedDevices(){
             </div>
             <button class="ci-notes-toggle ${rec.notes ? "has-note" : ""}" title="Add a note">+</button>
           </div>
+          ${recNeedsNote(rec)
+            ? `<div class="note-required">A note is required for ${escapeHtml(rec.condition)} — tap + and say what's wrong.</div>`
+            : ""}
           ${rec.notesOpen
             ? `<textarea class="ci-notes-input" placeholder="Note for this device…">${escapeHtml(rec.notes)}</textarea>`
             : ""}
@@ -2077,7 +2191,16 @@ function renderSelectedDevices(){
     if (notes){
       notes.addEventListener("input", (e) => {
         const rec = coSelectedDevices.get(id);
-        if (rec) rec.notes = e.target.value;
+        if (!rec) return;
+        const wasEmpty = !String(rec.notes || "").trim();
+        rec.notes = e.target.value;
+        // Only re-render on the empty↔filled transition: redrawing on every
+        // keystroke would take the focus out of the box mid-sentence.
+        if (conditionNeedsNote(rec.condition) && wasEmpty !== !String(rec.notes).trim()){
+          renderSelectedDevices();
+          const again = document.querySelector(`.selected-row[data-id="${CSS.escape(id)}"] .ci-notes-input`);
+          if (again){ again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+        }
       });
     }
   });
@@ -2088,12 +2211,21 @@ function renderSelectedDevices(){
 
 function updateSubmitEnabled(){
   const btn = document.getElementById("co-submit");
+  const errEl = document.getElementById("co-error");
   const n = coSelectedDevices.size;
-  btn.disabled = n === 0 || submitting;
+  const missing = coMissingNotes();
+  btn.disabled = n === 0 || submitting || missing.length > 0;
   if (submitting){
     btn.textContent = "Checking out…";
   } else {
     btn.textContent = n > 1 ? `Check out ${n} devices` : "Check out";
+  }
+  if (errEl && !submitting){
+    // Only speak up about missing notes; anything else in there is a real
+    // error from a submit and shouldn't be wiped by a re-render.
+    if (missing.length) errEl.textContent = needNoteMessage(missing, "checked out");
+    else if (errEl.dataset.owner === "notes") errEl.textContent = "";
+    errEl.dataset.owner = missing.length ? "notes" : "";
   }
 }
 
@@ -2268,7 +2400,7 @@ function renderCiKitChips(){
         group.devices.forEach(c => ciSelected.delete(c.checkoutId));
       } else {
         group.devices.forEach(c => {
-          if (!ciSelected.has(c.checkoutId)) ciSelected.set(c.checkoutId, { event: c, condition: "Good", notes: "", notesOpen: false });
+          if (!ciSelected.has(c.checkoutId)) ciSelected.set(c.checkoutId, newReturn(c));
         });
       }
       renderCheckinList();
@@ -2320,9 +2452,12 @@ function renderCheckinList(){
             </div>
             <button class="ci-notes-toggle ${rec.notes ? "has-note" : ""}" title="Add a note">+</button>
           </div>` : '<span class="check">✓ selected</span>';
-      const notesBlock = (selected && rec.notesOpen)
-        ? `<textarea class="ci-notes-input" placeholder="Note for this item…">${escapeHtml(rec.notes)}</textarea>`
-        : "";
+      const needsNote = selected && recNeedsNote(rec);
+      const notesBlock =
+        (needsNote ? `<div class="note-required">A note is required for ${escapeHtml(rec.condition)} — tap + and say what's wrong.</div>` : "") +
+        ((selected && rec.notesOpen)
+          ? `<textarea class="ci-notes-input" placeholder="Note for this item…">${escapeHtml(rec.notes)}</textarea>`
+          : "");
       return `
       <div class="open-item ${selected ? "selected" : ""} ${isMyCheckout(c) ? "mine" : ""}" data-checkout-id="${escapeHtml(c.checkoutId)}">
         <div class="top">
@@ -2363,7 +2498,7 @@ function renderCheckinList(){
       el.addEventListener("click", () => {
         if (!authInfo){ showAuthGate(); return; }
         if (ciSelected.has(checkoutId)) ciSelected.delete(checkoutId);
-        else ciSelected.set(checkoutId, { event: c, condition: "Good", notes: "", notesOpen: false });
+        else ciSelected.set(checkoutId, newReturn(c));
         renderCheckinList();
       });
 
@@ -2395,8 +2530,19 @@ function renderCheckinList(){
         // textarea would lose focus/cursor position while typing.
         notesInput.addEventListener("input", (e) => {
           const rec = ciSelected.get(checkoutId);
-          if (rec) rec.notes = e.target.value;
+          if (!rec) return;
+          const wasEmpty = !String(rec.notes || "").trim();
+          rec.notes = e.target.value;
           updateCiSubmitEnabled(); // a Damaged item unblocks as soon as a note exists
+          // Re-render only when the note goes from empty to filled or back, so
+          // the "required" prompt clears without the textarea losing the cursor
+          // mid-sentence.
+          if (conditionNeedsNote(rec.condition) && wasEmpty !== !String(rec.notes).trim()){
+            renderCheckinList();
+            const again = document.querySelector(
+              `.open-item[data-checkout-id="${CSS.escape(checkoutId)}"] .ci-notes-input`);
+            if (again){ again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+          }
         });
       }
     });
@@ -2420,8 +2566,20 @@ function renderCheckinDetails(){
 // Anything coming back Damaged files an issue report automatically, and that
 // report is only worth having if it says what's wrong — so the note stops
 // being optional the moment Damaged is chosen.
+// Check In already worked this way for Damaged — the button stays disabled and
+// says which item is holding it up. Fair now joins it, and Check Out uses the
+// same gate, so both sides behave identically. Telling someone the moment they
+// tap Fair beats telling them when they tap Submit.
 function ciDamagedMissingNotes(){
-  return [...ciSelected.values()].filter(rec => rec.condition === "Damaged" && !rec.notes.trim());
+  return [...ciSelected.values()]
+    .filter(recNeedsNote);
+}
+function coMissingNotes(){
+  return [...coSelectedDevices.values()].filter(recNeedsNote);
+}
+function needNoteMessage(recs, verb){
+  const names = recs.map(r => `${(r.device || r.event).tag} (${r.condition})`).join(", ");
+  return `Add a note for ${names} — anything marked Fair or Damaged needs a description before it can be ${verb}.`;
 }
 
 function updateCiSubmitEnabled(){
@@ -2436,9 +2594,7 @@ function updateCiSubmitEnabled(){
     btn.textContent = n > 1 ? `Check in ${n} items` : "Check in";
   }
   if (errEl && !submitting){
-    errEl.textContent = missing.length
-      ? `Add a note for ${missing.map(r => r.event.tag).join(", ")} — anything marked Damaged needs a description before it can be checked in.`
-      : "";
+    errEl.textContent = missing.length ? needNoteMessage(missing, "checked in") : "";
   }
 }
 
@@ -3101,7 +3257,8 @@ function withPartner(name, partner){
 
 function issueStatusClass(status){
   const s = String(status || "").toLowerCase();
-  if (issueIsResolved(s)) return "closed";
+  if (issueReleasesDevice(s)) return "closed";
+  if (issueIsRetired(s)) return "retired";
   return s === "in review" ? "review" : "open";
 }
 
@@ -3131,8 +3288,13 @@ function renderIssues(){
     listEl.innerHTML = '<div class="card"><div class="empty-hint">Couldn\'t reach the device issue log. Reports can\'t be listed right now — everything else still works.</div></div>';
     return;
   }
-  const openOnes = deviceIssues.filter(r => !issueIsResolved(r.status));
-  const closedOnes = deviceIssues.filter(r => issueIsResolved(r.status));
+  // Three groups, because a written-off device belongs in neither of the other
+  // two: it isn't outstanding (nobody is going to fix it) and it isn't cleared
+  // (it is never coming back). Leaving it under Needs attention would make that
+  // count drift away from meaning "things to action".
+  const openOnes = deviceIssues.filter(r => issueIsOutstanding(r.status));
+  const retiredOnes = deviceIssues.filter(r => issueIsRetired(r.status));
+  const closedOnes = deviceIssues.filter(r => issueReleasesDevice(r.status));
   if (deviceIssues.length === 0){
     listEl.innerHTML = '<div class="card"><div class="empty-hint">No issues reported.</div></div>';
     return;
@@ -3141,6 +3303,9 @@ function renderIssues(){
     `<div class="issues-group-head">Needs attention · ${openOnes.length}</div>` +
     (openOnes.length ? openOnes.map(renderIssueCard).join("")
                      : '<div class="card"><div class="empty-hint">Nothing outstanding.</div></div>') +
+    (retiredOnes.length
+      ? `<div class="issues-group-head">Retired · ${retiredOnes.length}</div>` + retiredOnes.map(renderIssueCard).join("")
+      : "") +
     (closedOnes.length
       ? `<div class="issues-group-head">Cleared · ${closedOnes.length}</div>` + closedOnes.map(renderIssueCard).join("")
       : "");
