@@ -146,7 +146,11 @@
   .selected-row .remove-btn:hover{color:var(--cond-damaged);}
   /* Where a pre-selected condition came from. Stated rather than asserted, so
      nobody has to guess why the app picked Fair for them. */
-  .carried-note{font-size:11.5px;line-height:1.45;color:var(--cond-fair);}
+  .carried-note{font-size:11.5px;line-height:1.45;color:var(--cond-fair);
+    background:var(--cond-fair-bg);border-radius:6px;padding:6px 8px;}
+  .carried-reason{margin-top:3px;font-style:italic;color:var(--ink);}
+  .carried-reason.none{font-style:normal;color:var(--sub);}
+  .carried-when{font-style:normal;color:var(--sub);}
   .note-required{font-size:11.5px;color:var(--cond-damaged);font-weight:600;margin-top:2px;}
 
   .cond-choices{display:flex;gap:8px;margin-top:6px;}
@@ -180,9 +184,24 @@
   .ci-notes-toggle.has-note{background:var(--c-violet-soft);border-color:var(--c-violet);}
   .ci-notes-input{margin-top:10px;width:100%;}
 
-  .activity-item{padding:10px 0;border-bottom:1px solid var(--border);font-size:13px;}
-  .activity-item:last-child{border-bottom:none;}
-  .activity-item .meta{color:var(--sub);font-size:12px;margin-top:2px;}
+  .activity-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+    font-size:11.5px;color:var(--sub);font-weight:600;padding:0 0 8px;}
+  .activity-day{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--c-violet);padding:12px 0 5px;}
+  .activity-day:first-of-type{padding-top:2px;}
+  .act-group{border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:8px;
+    background:var(--panel);font-size:13px;}
+  .act-top{display:flex;justify-content:space-between;align-items:baseline;gap:10px;}
+  .act-who{font-weight:700;}
+  .act-time{color:var(--sub);font-size:12px;white-space:nowrap;}
+  .act-meta{color:var(--sub);font-size:12px;margin-top:2px;}
+  .act-flag{color:var(--c-pink);font-weight:600;}
+  .act-devs{margin-top:8px;display:flex;flex-direction:column;gap:4px;}
+  .act-dev{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;
+    padding:4px 8px;border-radius:6px;background:var(--hover-bg);}
+  .act-dev .tagname{font-weight:600;}
+  .act-dev .mdl{color:var(--sub);}
+  .act-note{color:var(--sub);font-size:12px;margin-top:2px;font-style:italic;}
   .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;}
   .dot.checkout{background:var(--c-pink);}
   .dot.checkin{background:var(--cond-good);}
@@ -1322,7 +1341,11 @@ function mergeCheckoutLog(remoteRows){
     tag: String(r.tag || ""), model: String(r.model || ""), serial: String(r.serial || ""),
     project: String(r.project || ""), location: String(r.location || ""),
     destination: String(r.destination || ""), partner: String(r.partner || ""),
-    condition: String(r.condition || ""), notes: String(r.notes || "")
+    condition: String(r.condition || ""), notes: String(r.notes || ""),
+    // Was being dropped here, so the role made it into Excel and then
+    // vanished on the way back. Nothing reads it yet; it would have been a
+    // puzzle the first time something did.
+    sessionRole: String(r.sessionRole || "")
   })).filter(r => r.id);
   // A retried write that turned out to have landed the first time leaves two
   // identical ids in the table. Collapsing them here keeps the UI honest;
@@ -1330,6 +1353,13 @@ function mergeCheckoutLog(remoteRows){
   const seen = new Set();
   const deduped = remote.filter(r => (seen.has(r.id) ? false : (seen.add(r.id), true)));
   remote.length = 0; remote.push(...deduped);
+  // Position in the table IS the chronological order — Excel appends, and
+  // nothing ever reorders it. That makes the index a reliable sort key, which
+  // the timestamp is not: `ts` is a formatted local-time string, so comparing
+  // two of them as text puts 10/9 above 10/13 (because "9" > "1") and
+  // September above October. That is what made Recent Activity look stale —
+  // the newest rows were sorting to the bottom and falling off the list.
+  remote.forEach((r, i) => { r._seq = i; });
   const remoteIds = new Set(remote.map(r => r.id));
   const stillPending = checkoutLog.filter(e => e._local && !remoteIds.has(e.id) && (Date.now() - (e._addedAt || 0)) < 2 * 60 * 1000);
   checkoutLog = [...stillPending, ...remote];
@@ -1624,10 +1654,57 @@ function lastCheckinFor(deviceId){
 
 // The check-in event worth carrying forward, or null. Returns the whole event
 // so the UI can say where the condition came from rather than asserting it.
+// The most recent check-in for this device that actually explains a condition.
+//
+// Needed because the latest row usually doesn't. Once a device is carrying
+// Fair, returning it unchanged requires no new note — so the newest check-in is
+// typically blank and the reason sits on whichever earlier return first marked
+// it Fair. Reading only the latest row showed "Returned Fair by Lesther,
+// 13/10" with no indication of why, which is exactly the question a moderator
+// has at that moment.
+function lastConditionNoteFor(deviceId, condition){
+  let fromServer = null;
+  let fromLocal = null;
+  checkoutLog.forEach(e => {
+    if (e.eventType !== "checkin" || e.deviceId !== deviceId) return;
+    if (String(e.condition) !== condition || !String(e.notes || "").trim()) return;
+    if (e._local){
+      if (!fromLocal || (e._addedAt || 0) >= (fromLocal._addedAt || 0)) fromLocal = e;
+    } else {
+      fromServer = e;
+    }
+  });
+  return fromLocal || fromServer;
+}
+
+// { event, note, noteFrom } — the return that set the condition, the text
+// explaining it, and the return that text came from (which may be an earlier
+// one). note is "" when nothing anywhere says why, which the UI states rather
+// than leaving blank.
 function carriedCondition(deviceId){
   const last = lastCheckinFor(deviceId);
   if (!last || String(last.condition) !== "Fair") return null;
-  return last;
+  const noteFrom = lastConditionNoteFor(deviceId, "Fair");
+  return {
+    event: last,
+    modName: last.modName,
+    partner: last.partner,
+    ts: last.ts,
+    note: noteFrom ? String(noteFrom.notes).trim() : "",
+    noteFrom: noteFrom || null,
+    // Only worth dating the note when it came from a different return.
+    noteIsOlder: !!(noteFrom && noteFrom.id !== last.id)
+  };
+}
+
+// The short version, for the catalogue pill's tooltip.
+function carriedSummary(carried){
+  if (!carried) return "";
+  const who = withPartner(carried.modName, carried.partner);
+  const when = String(carried.ts).split(",")[0];
+  return carried.note
+    ? `Returned Fair by ${who}, ${when} — ${carried.note}`
+    : `Returned Fair by ${who}, ${when} — no reason recorded`;
 }
 
 // A return defaults to the condition the device went OUT in, not to Good:
@@ -2024,7 +2101,7 @@ function coDeviceRowHtml(entry){
           <div class="tag">${escapeHtml(d.tag)} — ${escapeHtml(d.model)}</div>
           <div class="meta">Serial ${escapeHtml(d.serial)}</div>
         </div>
-        ${carried ? '<span class="pill fair">Fair</span>' : ""}
+        ${carried ? `<span class="pill fair" title="${escapeHtml(carriedSummary(carried))}">Fair</span>` : ""}
         <span class="check">✓ selected</span>
       </div>`;
 }
@@ -2109,6 +2186,23 @@ function renderSoloBanner(){
   }
 }
 
+// Two lines: who left it in this state, then why. The reason gets its own
+// line and quote marks because it's the part a moderator actually acts on —
+// buried at the end of a sentence it was being skipped.
+function carriedNoteHtml(carried){
+  const who = escapeHtml(withPartner(carried.modName, carried.partner));
+  const when = escapeHtml(String(carried.ts).split(",")[0]);
+  const reason = carried.note
+    ? `<div class="carried-reason">\u201c${escapeHtml(carried.note)}\u201d${
+        carried.noteIsOlder
+          ? ` <span class="carried-when">noted ${escapeHtml(String(carried.noteFrom.ts).split(",")[0])}</span>`
+          : ""}</div>`
+    // Said out loud rather than left blank: an empty space reads as a bug,
+    // and "nobody wrote down why" is itself worth knowing.
+    : `<div class="carried-reason none">No reason was recorded.</div>`;
+  return `<div class="carried-note">Returned Fair by ${who}, ${when}${reason}</div>`;
+}
+
 function renderSelectedDevices(){
   const wrap = document.getElementById("co-selected-wrap");
   const detailsCard = document.getElementById("co-details-card");
@@ -2141,7 +2235,7 @@ function renderSelectedDevices(){
             </div>
             <button class="remove-btn" data-id="${escapeHtml(id)}" title="Remove">✕</button>
           </div>
-          ${rec.carriedFrom ? `<div class="carried-note">Returned Fair by ${escapeHtml(withPartner(rec.carriedFrom.modName, rec.carriedFrom.partner))}, ${escapeHtml(String(rec.carriedFrom.ts).split(",")[0])}${rec.carriedFrom.notes ? ` · “${escapeHtml(rec.carriedFrom.notes)}”` : ""}</div>` : ""}
+          ${rec.carriedFrom ? carriedNoteHtml(rec.carriedFrom) : ""}
           <div class="ci-row-controls">
             <div class="mini-cond">
               <div class="mini-cond-choice sel-good ${rec.condition === "Good" ? "selected" : ""}" data-cond="Good">Good</div>
@@ -2710,20 +2804,171 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
 // ---------------------------------------------------------------------------
 // ACTIVITY panel
 // ---------------------------------------------------------------------------
+// How far back Recent Activity looks by default. Two days covers "what
+// happened on the last shift" without the list becoming a wall — at ten
+// moderators the old fixed last-40 was barely half a morning.
+//
+// This is a DISPLAY window only. The app still loads the whole log, because
+// working out what is currently checked out means pairing every checkout with
+// its check-in, and something taken three weeks ago and still out has to
+// appear on Check In. Narrowing the fetch would hide exactly the gear most
+// likely to go missing.
+const ACTIVITY_DAYS = 2;
+const ACTIVITY_MAX = 200;
+let activityShowAll = false;
+
+// Newest first, by position in the table rather than by parsing the timestamp.
+// Locally-appended rows have not reached Excel yet, so they always sort above
+// anything the server returned.
+function activitySorted(){
+  return [...checkoutLog].sort((a, b) => {
+    const al = a._local ? 1 : 0, bl = b._local ? 1 : 0;
+    if (al !== bl) return bl - al;
+    if (al) return (b._addedAt || 0) - (a._addedAt || 0);
+    return (b._seq || 0) - (a._seq || 0);
+  });
+}
+
+// Tolerant on purpose: a row whose timestamp can't be read is kept rather than
+// hidden. Losing a row from the view because its date was odd would be worse
+// than showing one that is slightly too old.
+function eventDayStart(e){
+  const t = Date.parse(String(e.ts || ""));
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t);
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+}
+
+function dayLabel(dayStart, rawDate){
+  if (dayStart === null) return rawDate || "Earlier";
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const DAY = 24 * 60 * 60 * 1000;
+  if (dayStart === today) return "Today";
+  if (dayStart === today - DAY) return "Yesterday";
+  return new Date(dayStart).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
+}
+
+// A five-device check-out is written as five rows seconds apart, and listing
+// them separately made one trip look like five events. They're regrouped here
+// into the batch they actually were.
+//
+// Consecutive rows join a batch when the same person (and partner) did the
+// same thing, to the same place, close together in time — chained from each
+// row to the one before it rather than measured from the first, so a slow
+// batch that took a couple of minutes to write still holds together.
+const ACTIVITY_BATCH_GAP_MS = 5 * 60 * 1000;
+
+function groupActivity(items){
+  const groups = [];
+  items.forEach(e => {
+    const key = [e.modName, e.partner, e.eventType, e.project, e.location, e.destination].join("\u0001");
+    const t = Date.parse(String(e.ts || ""));
+    const last = groups[groups.length - 1];
+    // A row whose timestamp can't be read never joins a batch and never takes
+    // one in: without a time there is no way to know it belongs, and swallowing
+    // it would also cost it its own day heading.
+    const joins = last && last.key === key &&
+      Number.isFinite(t) && Number.isFinite(last.edgeTs) &&
+      Math.abs(last.edgeTs - t) <= ACTIVITY_BATCH_GAP_MS;
+    if (joins){
+      last.events.push(e);
+      if (Number.isFinite(t)) last.edgeTs = t;
+    } else {
+      groups.push({ key, head: e, events: [e], edgeTs: Number.isFinite(t) ? t : null });
+    }
+  });
+  return groups;
+}
+
+// "9:58 AM" where the timestamp is readable, the raw string where it isn't.
+function activityTimeLabel(ts){
+  const t = Date.parse(String(ts || ""));
+  if (!Number.isFinite(t)) return String(ts || "");
+  return new Date(t).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+
+function activityGroupHtml(g){
+  const e = g.head;
+  const n = g.events.length;
+  const out = e.eventType === "checkout";
+  // Pills only where there is something to say. A column of green "Good"
+  // badges is noise that hides the one row that isn't.
+  const notGood = g.events.filter(x => String(x.condition) && x.condition !== "Good");
+  const devices = g.events.map(x => `
+      <div class="act-dev">
+        <div class="n"><span class="tagname">${escapeHtml(x.tag)}</span> <span class="mdl">${escapeHtml(x.model)}${x.serial ? " · " + escapeHtml(x.serial) : ""}</span>
+          ${x.notes ? `<div class="act-note">${escapeHtml(x.notes)}</div>` : ""}</div>
+        ${x.condition && x.condition !== "Good"
+          ? `<span class="pill ${escapeHtml(String(x.condition).toLowerCase())}">${escapeHtml(x.condition)}</span>` : ""}
+      </div>`).join("");
+
+  return `
+    <div class="act-group">
+      <div class="act-top">
+        <div class="act-who">${escapeHtml(withPartner(e.modName, e.partner))}</div>
+        <div class="act-time">${escapeHtml(activityTimeLabel(e.ts))}</div>
+      </div>
+      <div class="act-meta"><span class="dot ${escapeHtml(e.eventType)}"></span>${
+        out ? "Checked out" : "Checked in"} ${n} device${n === 1 ? "" : "s"} · ${
+        escapeHtml(e.project)} / ${escapeHtml(e.location)}${
+        e.destination ? ` → ${escapeHtml(e.destination)}` : ""}${
+        notGood.length ? ` · <span class="act-flag">${notGood.length} not Good</span>` : ""}</div>
+      <div class="act-devs">${devices}</div>
+    </div>`;
+}
+
 function renderActivity(){
-  const items = [...checkoutLog]
-    .sort((a, b) => (b._addedAt || 0) - (a._addedAt || 0) || String(b.ts).localeCompare(String(a.ts)))
-    .slice(0, 40);
   const listEl = document.getElementById("activity-list");
+  const sorted = activitySorted();
+  const DAY = 24 * 60 * 60 * 1000;
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const cutoff = todayStart - (ACTIVITY_DAYS - 1) * DAY;
+
+  const inWindow = sorted.filter(e => {
+    const d = eventDayStart(e);
+    return d === null || d >= cutoff;   // unreadable date: keep it
+  });
+  const items = (activityShowAll ? sorted : inWindow).slice(0, ACTIVITY_MAX);
+
+  const toggle = `<button class="link-btn" id="activity-toggle">${
+    activityShowAll ? `Show the last ${ACTIVITY_DAYS} days` : "Show everything"}</button>`;
+
   if (items.length === 0){
-    listEl.innerHTML = '<div class="empty-hint">No activity yet.</div>';
+    listEl.innerHTML = `<div class="empty-hint">${
+      checkoutLog.length === 0
+        ? "No activity yet."
+        : `Nothing in the last ${ACTIVITY_DAYS} days. ${toggle}`}</div>`;
+    wireActivityToggle();
     return;
   }
-  listEl.innerHTML = items.map(e => `
-    <div class="activity-item">
-      <div><span class="dot ${escapeHtml(e.eventType)}"></span><b>${e.eventType === "checkout" ? "Checked out" : "Checked in"}</b> — ${escapeHtml(e.tag)} (${escapeHtml(e.model)}, ${escapeHtml(e.serial)})</div>
-      <div class="meta">${escapeHtml(withPartner(e.modName, e.partner))} · ${escapeHtml(e.project)} / ${escapeHtml(e.location)}${e.destination ? ` → ${escapeHtml(e.destination)}` : ""} · ${escapeHtml(e.ts)} · <span class="pill ${e.condition.toLowerCase()}">${escapeHtml(e.condition)}</span>${e.notes ? " · " + escapeHtml(e.notes) : ""}</div>
-    </div>`).join("");
+
+  // Grouped by day, so a long list reads as shifts rather than one stream.
+  let html = `<div class="activity-head"><span>${
+    activityShowAll
+      ? `All activity · ${items.length} device${items.length === 1 ? "" : "s"}${
+          sorted.length > ACTIVITY_MAX ? " shown" : ""}`
+      : `Last ${ACTIVITY_DAYS} days · ${items.length} device${items.length === 1 ? "" : "s"}`}</span>${toggle}</div>`;
+  let lastKey = null;
+  groupActivity(items).forEach(g => {
+    const e = g.head;
+    const d = eventDayStart(e);
+    const raw = String(e.ts || "").split(",")[0];
+    const key = d === null ? raw : String(d);
+    if (key !== lastKey){
+      html += `<div class="activity-day">${escapeHtml(dayLabel(d, raw))}</div>`;
+      lastKey = key;
+    }
+    html += activityGroupHtml(g);
+  });
+  listEl.innerHTML = html;
+  wireActivityToggle();
+}
+
+function wireActivityToggle(){
+  const btn = document.getElementById("activity-toggle");
+  if (btn) btn.addEventListener("click", () => { activityShowAll = !activityShowAll; renderActivity(); });
 }
 
 // ---------------------------------------------------------------------------
