@@ -381,6 +381,29 @@
   .help-btn{width:28px;height:28px;padding:0;border-radius:50%;font-size:14px;font-weight:700;color:var(--c-violet);display:none;align-items:center;justify-content:center;flex-shrink:0;}
   .help-btn.visible{display:flex;}
   .header-right{display:flex;align-items:center;gap:12px;}
+
+  /* --- Overnight reminder ------------------------------------------------ */
+  /* Same family as the checklist and result dialogs: white card, 14px
+     radius, DM Sans. The red is the damaged tone, so this reads as
+     "still out" rather than as another violet task. */
+  #overdueBackdrop{z-index:55;}
+  .overdue-modal{background:var(--panel);color:var(--ink);border-radius:14px;padding:22px 22px 18px;width:440px;max-width:92vw;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 18px 50px rgba(28,27,41,.22);}
+  .overdue-eyebrow{font-size:11px;font-weight:700;letter-spacing:.09em;color:var(--cond-damaged);text-transform:uppercase;margin-bottom:6px;}
+  .overdue-modal h3{font-size:20px;font-weight:700;margin:0 0 8px;letter-spacing:-.01em;line-height:1.25;}
+  .overdue-lead{font-size:13.5px;line-height:1.5;color:var(--sub);margin:0 0 14px;}
+  .overdue-list{overflow-y:auto;max-height:min(280px,46vh);}
+  .overdue-item{background:var(--cond-damaged-bg);border-radius:10px;padding:10px 12px;margin-bottom:8px;}
+  .overdue-item:last-child{margin-bottom:0;}
+  .overdue-name{font-weight:700;font-size:13.5px;}
+  .overdue-meta{color:var(--sub);font-size:12.5px;margin-top:2px;line-height:1.4;}
+  .overdue-age{color:var(--cond-damaged);font-weight:700;font-size:12.5px;margin-top:3px;}
+  .overdue-actions{display:flex;align-items:center;gap:14px;margin-top:16px;}
+  button.overdue-go{flex:1;background:var(--cond-damaged);color:#fff;border-color:var(--cond-damaged);font-weight:700;border-radius:8px;padding:11px 16px;}
+  button.overdue-go:hover:not(:disabled){filter:brightness(0.96);}
+  button.overdue-later{border:none;background:none;color:var(--sub);font-weight:600;padding:8px 2px;white-space:nowrap;}
+  button.overdue-later:hover{color:var(--ink);filter:none;}
+  .pill.overdue{background:var(--cond-damaged-bg);color:var(--cond-damaged);margin-left:6px;font-size:10px;letter-spacing:.02em;vertical-align:1px;}
+  .open-item.overdue-focus{box-shadow:0 0 0 2px rgba(220,38,38,.45);}
 </style>
 </head>
 <body>
@@ -657,6 +680,22 @@
   </div>
 </div>
 
+<!-- Overnight gear still out past midnight Pacific. Shown once the role
+     dialog has closed and the checkout log has loaded; "Not now" hides it
+     for the rest of this browser session. -->
+<div class="modal-backdrop" id="overdueBackdrop">
+  <div class="overdue-modal" role="dialog" aria-modal="true" aria-labelledby="overdueTitle">
+    <div class="overdue-eyebrow">Reminder</div>
+    <h3 id="overdueTitle">You still have devices out</h3>
+    <p class="overdue-lead" id="overdueLead"></p>
+    <div class="overdue-list" id="overdueList"></div>
+    <div class="overdue-actions">
+      <button id="overdue-go" class="overdue-go">Take me to Check In</button>
+      <button id="overdue-later" class="overdue-later">Not now</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="authGateBackdrop">
   <div class="modal">
     <h3>Sign in</h3>
@@ -906,6 +945,8 @@ document.getElementById("resultModalClose").addEventListener("click", () => {
     const queued = pendingEscalation;
     pendingEscalation = null;
     showEscalationModal(queued);
+  } else {
+    maybeShowOverdueReminder();
   }
 });
 
@@ -1135,6 +1176,7 @@ function showEscalationModal(issues){
 
 document.getElementById("escalationClose").addEventListener("click", () => {
   document.getElementById("escalationBackdrop").classList.remove("open");
+  maybeShowOverdueReminder();
 });
 
 // Explicit, hard-to-miss "this is loading" indicator for a checkout/checkin
@@ -1255,7 +1297,12 @@ function openRoleModal(firstRun){
   renderRoleChoices();
   document.getElementById("roleBackdrop").classList.add("open");
 }
-function closeRoleModal(){ document.getElementById("roleBackdrop").classList.remove("open"); }
+function closeRoleModal(){
+  document.getElementById("roleBackdrop").classList.remove("open");
+  // The reminder waits out this dialog. On a first visit the role isn't known
+  // until Save, and the partner chosen here changes whose gear counts.
+  maybeShowOverdueReminder();
+}
 
 document.getElementById("role-cancel").addEventListener("click", closeRoleModal);
 document.getElementById("role-save").addEventListener("click", () => {
@@ -1387,6 +1434,10 @@ async function loadOwnData(){
     applyCredentials(data.credentials || []);
     evaluateAuthGate();
     mergeCheckoutLog(data.checkoutLog || []);
+    // The reminder waits for a real load. The local cache can still list gear
+    // that another browser already returned, and a popup about that would be
+    // a false alarm.
+    overdueLogReady = true;
     // Destinations is a simple admin-maintained list (own Destinations tab in
     // this site's workbook) — optional on the Load flow's response, so an
     // older/not-yet-updated flow just means an empty list (dropdown still
@@ -1781,13 +1832,12 @@ function kitTooltipHtml(devices){
 // ---------------------------------------------------------------------------
 // Tabs
 // ---------------------------------------------------------------------------
+function activateTab(name){
+  document.querySelectorAll(".tab-btn").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".panel").forEach(p => p.classList.toggle("active", p.id === "panel-" + name));
+}
 document.querySelectorAll(".tab-btn").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
-    document.querySelectorAll(".panel").forEach(p => p.classList.remove("active"));
-    btn.classList.add("active");
-    document.getElementById("panel-" + btn.dataset.tab).classList.add("active");
-  });
+  btn.addEventListener("click", () => activateTab(btn.dataset.tab));
 });
 
 // ---------------------------------------------------------------------------
@@ -2519,6 +2569,276 @@ function isMyCheckout(c){
   return !!mate && names.includes(mate);
 }
 
+// ---------------------------------------------------------------------------
+// Overnight reminder
+// ---------------------------------------------------------------------------
+// A checkout is overdue when it is still open and its timestamp is before
+// the start of today in America/Los_Angeles — gear that stayed out past
+// midnight Pacific. The popup only lists rows isMyCheckout() claims (the
+// signed-in mod or their current partner). The Check In pill uses the same
+// clock for every open row, so other people's overnight gear is visible too.
+//
+// `ts` is the submitting browser's locale string, with no zone. Unzoned
+// values are read as Pacific wall time, which is the clock this rule is
+// defined on, so the answer doesn't change when the page is opened somewhere
+// else. A string we can't read is not overdue: a false alarm is worse than
+// a missed one. Local rows that haven't round-tripped through Excel yet
+// carry `_addedAt`, an absolute instant, and that wins over `ts`.
+let overdueLogReady = false;
+let overdueDecided = false;
+const OVERDUE_DISMISS_PREFIX = "checkinout-overdue-dismissed-v1:";
+
+function overdueDismissKey(){
+  const who = authInfo ? String(authInfo.login || authInfo.name || "") : "";
+  return OVERDUE_DISMISS_PREFIX + who.toLowerCase();
+}
+function overdueDismissed(){
+  try { return sessionStorage.getItem(overdueDismissKey()) === "1"; }
+  catch (err){ return false; }
+}
+function markOverdueDismissed(){
+  try { sessionStorage.setItem(overdueDismissKey(), "1"); }
+  catch (err){ /* closed for this page even if storage is blocked */ }
+}
+
+function isRealDate(y, mo, d){
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
+// Civil time in America/Los_Angeles → UTC epoch ms. Null when that wall
+// clock doesn't exist (the spring-forward gap). Midnight is never in the
+// gap, so the "start of today" boundary itself always resolves.
+function pacificWallToUtc(y, mo, d, h, mi, s){
+  if (!isRealDate(y, mo, d)) return null;
+  if (h > 23 || mi > 59 || s > 59 || h < 0 || mi < 0 || s < 0) return null;
+  const timeZone = "America/Los_Angeles";
+  const utcGuess = Date.UTC(y, mo - 1, d, h, mi, s);
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23"
+  });
+  const read = (ms) => {
+    const parts = {};
+    fmt.formatToParts(new Date(ms)).forEach(p => { if (p.type !== "literal") parts[p.type] = p.value; });
+    let ph = Number(parts.hour);
+    if (ph === 24) ph = 0;
+    return {
+      y: Number(parts.year), mo: Number(parts.month), d: Number(parts.day),
+      h: ph, mi: Number(parts.minute), s: Number(parts.second)
+    };
+  };
+  const seen = read(utcGuess);
+  const asUtc = Date.UTC(seen.y, seen.mo - 1, seen.d, seen.h, seen.mi, seen.s);
+  const result = utcGuess - (asUtc - utcGuess);
+  const back = read(result);
+  if (back.y !== y || back.mo !== mo || back.d !== d || back.h !== h || back.mi !== mi || back.s !== s) return null;
+  return result;
+}
+
+function pacificTodayStart(now){
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    year: "numeric", month: "2-digit", day: "2-digit", hourCycle: "h23"
+  });
+  const parts = {};
+  fmt.formatToParts(now).forEach(p => { if (p.type !== "literal") parts[p.type] = p.value; });
+  return pacificWallToUtc(Number(parts.year), Number(parts.month), Number(parts.day), 0, 0, 0);
+}
+
+function hasExplicitZone(s){
+  if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(s)) return true;
+  if (/\b(?:GMT|UTC|PST|PDT|EST|EDT|CST|CDT|MST|MDT)\b/i.test(s)) return true;
+  return false;
+}
+
+// Month-first, matching the en-US strings toLocaleString() writes here
+// ("10/9" is September, which is why these can't be sorted as text). A first
+// number past 12 can only be a day, so those flip rather than get dropped.
+function parseWallClock(s){
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?$/);
+  if (m){
+    return {
+      y: +m[1], mo: +m[2], d: +m[3],
+      h: m[4] == null ? 0 : +m[4], mi: m[5] == null ? 0 : +m[5], s: m[6] == null ? 0 : +m[6]
+    };
+  }
+  m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})(?:[,\s]+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(AM|PM|A\.M\.|P\.M\.)?)?$/i);
+  if (!m) return null;
+  let month = +m[1], day = +m[2], year = +m[3];
+  if (year < 100) year += 2000;
+  if (month > 12 && day <= 12){ const tmp = month; month = day; day = tmp; }
+  else if (month > 12 || day > 31 || day < 1 || month < 1) return null;
+  let hour = m[4] == null ? 0 : +m[4];
+  const minute = m[5] == null ? 0 : +m[5];
+  const second = m[6] == null ? 0 : +m[6];
+  const ap = (m[7] || "").replace(/\./g, "").toUpperCase();
+  if (ap === "PM" && hour < 12) hour += 12;
+  if (ap === "AM" && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59 || second > 59) return null;
+  return { y: year, mo: month, d: day, h: hour, mi: minute, s: second };
+}
+
+function parseCheckoutTimestamp(raw){
+  const original = String(raw ?? "").trim();
+  if (!original) return null;
+  // "PT" isn't a zone V8's Date.parse understands. It means Pacific, which
+  // is already how an unzoned wall clock is read below.
+  if (hasExplicitZone(original) && !/\s+PT$/i.test(original)){
+    const t = Date.parse(original);
+    return Number.isFinite(t) ? t : null;
+  }
+  const wall = parseWallClock(original.replace(/\s+PT$/i, "").trim());
+  if (!wall) return null;
+  return pacificWallToUtc(wall.y, wall.mo, wall.d, wall.h, wall.mi, wall.s);
+}
+
+function checkoutInstant(c){
+  if (!c) return null;
+  if (c._local && Number.isFinite(c._addedAt) && c._addedAt > 0) return c._addedAt;
+  return parseCheckoutTimestamp(c.ts);
+}
+
+function isOverdueCheckout(c, now){
+  const at = checkoutInstant(c);
+  const start = pacificTodayStart(now || new Date());
+  if (at == null || start == null) return false;
+  return at < start;
+}
+
+function myOverdueCheckouts(now){
+  const atNow = now || new Date();
+  return openCheckouts()
+    .filter(isMyCheckout)
+    .map(c => ({ checkout: c, at: checkoutInstant(c) }))
+    .filter(x => {
+      const start = pacificTodayStart(atNow);
+      return x.at != null && start != null && x.at < start;
+    })
+    .sort((a, b) => a.at - b.at);
+}
+
+function pacificYmd(ms){
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles", year: "numeric", month: "2-digit", day: "2-digit"
+  });
+  const parts = {};
+  fmt.formatToParts(new Date(ms)).forEach(p => { if (p.type !== "literal") parts[p.type] = p.value; });
+  return parts.year + "-" + parts.month + "-" + parts.day;
+}
+
+function formatOverdueWhen(at, now){
+  const start = pacificTodayStart(new Date(now));
+  const todayKey = start == null ? "" : pacificYmd(start);
+  const yestKey = start == null ? "" : pacificYmd(start - 1);
+  const key = pacificYmd(at);
+  let day;
+  if (key && key === todayKey) day = "today";
+  else if (key && key === yestKey) day = "yesterday";
+  else {
+    const opts = { timeZone: "America/Los_Angeles", month: "short", day: "numeric" };
+    if (!todayKey || key.slice(0, 4) !== todayKey.slice(0, 4)) opts.year = "numeric";
+    day = new Intl.DateTimeFormat("en-US", opts).format(new Date(at));
+  }
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles", hour: "numeric", minute: "2-digit"
+  }).format(new Date(at));
+  return day + " " + time;
+}
+
+function overdueAgeLabel(at, now){
+  const hours = Math.max(0, Math.floor((now - at) / 3600000));
+  if (hours < 1) return "out <1h";
+  if (hours < 48) return "out " + hours + "h";
+  return "out " + Math.floor(hours / 24) + "d";
+}
+
+function renderOverdueModal(items){
+  const n = items.length;
+  const now = Date.now();
+  document.getElementById("overdueTitle").textContent =
+    n === 1 ? "You still have 1 device out" : "You still have " + n + " devices out";
+  document.getElementById("overdueLead").textContent = n === 1
+    ? "This was checked out before midnight Pacific and hasn't been returned. Check it in so the next shift can use it."
+    : "These were checked out before midnight Pacific and haven't been returned. Check them in so the next shift can use them.";
+  document.getElementById("overdueList").innerHTML = items.map(({ checkout: c, at }) => {
+    const where = [c.project, c.location].filter(Boolean).join(" / ");
+    const when = "checked out " + formatOverdueWhen(at, now);
+    const meta = [where, when].filter(Boolean).join(" · ");
+    return `
+      <div class="overdue-item">
+        <div class="overdue-name">${escapeHtml(c.tag)} — ${escapeHtml(c.model)}</div>
+        <div class="overdue-meta">${escapeHtml(meta)}</div>
+        <div class="overdue-age">Overdue · ${escapeHtml(overdueAgeLabel(at, now))}</div>
+      </div>`;
+  }).join("");
+}
+
+function overdueBlockedByOtherModal(){
+  return ["authGateBackdrop", "roleBackdrop", "progressModalBackdrop", "resultModalBackdrop", "escalationBackdrop", "onbBackdrop", "issueBackdrop"]
+    .some(id => {
+      const el = document.getElementById(id);
+      return el && el.classList.contains("open");
+    });
+}
+
+function closeOverdueModal(){
+  document.getElementById("overdueBackdrop").classList.remove("open");
+}
+
+function dismissOverdueReminder(){
+  markOverdueDismissed();
+  overdueDecided = true;
+  closeOverdueModal();
+}
+
+function maybeShowOverdueReminder(){
+  const backdrop = document.getElementById("overdueBackdrop");
+  if (!backdrop || backdrop.classList.contains("open") || overdueDecided) return;
+  if (!authInfo || !overdueLogReady || !sessionRole) return;
+  if (overdueBlockedByOtherModal()) return;
+  if (overdueDismissed()){ overdueDecided = true; return; }
+  const items = myOverdueCheckouts();
+  if (items.length === 0){ overdueDecided = true; return; }
+  overdueDecided = true;
+  renderOverdueModal(items);
+  backdrop.classList.add("open");
+  const go = document.getElementById("overdue-go");
+  if (go) go.focus();
+}
+
+function takeMeToCheckIn(){
+  closeOverdueModal();
+  activateTab("checkin");
+  const search = document.getElementById("ci-search");
+  if (search && search.value) search.value = "";
+  renderCheckinList();
+  const ids = myOverdueCheckouts().map(x => x.checkout.checkoutId);
+  let first = null;
+  ids.forEach(id => {
+    const el = document.querySelector('.open-item[data-checkout-id="' + CSS.escape(id) + '"]');
+    if (!el) return;
+    el.classList.add("overdue-focus");
+    if (!first) first = el;
+  });
+  if (!first) return;
+  first.setAttribute("tabindex", "-1");
+  requestAnimationFrame(() => {
+    first.focus({ preventScroll: true });
+    first.scrollIntoView({ block: "center" });
+  });
+}
+
+document.getElementById("overdue-go").addEventListener("click", takeMeToCheckIn);
+document.getElementById("overdue-later").addEventListener("click", dismissOverdueReminder);
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const backdrop = document.getElementById("overdueBackdrop");
+  if (!backdrop || !backdrop.classList.contains("open")) return;
+  if (overdueBlockedByOtherModal()) return;
+  dismissOverdueReminder();
+});
+
 function renderCheckinList(){
   const q = document.getElementById("ci-search").value.trim().toLowerCase();
   const open = openCheckouts().filter(c =>
@@ -2556,7 +2876,7 @@ function renderCheckinList(){
       <div class="open-item ${selected ? "selected" : ""} ${isMyCheckout(c) ? "mine" : ""}" data-checkout-id="${escapeHtml(c.checkoutId)}">
         <div class="top">
           <div>
-            <div class="name">${escapeHtml(c.tag)} — ${escapeHtml(c.model)}</div>
+            <div class="name">${escapeHtml(c.tag)} — ${escapeHtml(c.model)}${isOverdueCheckout(c) ? ' <span class="pill overdue">Overdue</span>' : ""}</div>
             <div class="meta">Serial ${escapeHtml(c.serial)} · ${escapeHtml(c.project)} / ${escapeHtml(c.location)}${c.destination ? ` → ${escapeHtml(c.destination)}` : ""}</div>
             <div class="meta">Checked out by ${escapeHtml(withPartner(c.modName, c.partner))} · ${escapeHtml(c.ts)}</div>
           </div>
@@ -3564,6 +3884,7 @@ function renderAll(){
   renderCheckinList();
   renderActivity();
   renderIssues();
+  maybeShowOverdueReminder();
 }
 
 function escapeHtml(s){
