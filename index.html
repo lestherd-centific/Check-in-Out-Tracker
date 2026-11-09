@@ -465,13 +465,11 @@
     </div>
 
     <div class="card" id="co-destination-card" style="display:none;">
-      <h3>3. Destination <span style="font-weight:400;color:var(--sub);">(optional)</span></h3>
-      <div class="sync-status" style="margin:-4px 0 8px;">Where is this equipment actually going? Leave blank if it's staying at/near the origin above.</div>
+      <h3>3. Destination <span style="font-weight:400;color:var(--sub);">(required)</span></h3>
+      <div class="sync-status" style="margin:-4px 0 8px;">Where is this equipment actually going?</div>
       <select id="co-destination">
-        <option value="">Not specified</option>
-        <option value="__other__">Other — type a new destination…</option>
+        <option value="" disabled selected>Select a destination…</option>
       </select>
-      <input type="text" id="co-destination-other" placeholder="e.g. Client Site — Seattle Office" style="display:none;margin-top:8px;">
     </div>
 
     <div class="card" id="co-details-card" style="display:none;">
@@ -1440,8 +1438,9 @@ async function loadOwnData(){
     overdueLogReady = true;
     // Destinations is a simple admin-maintained list (own Destinations tab in
     // this site's workbook) — optional on the Load flow's response, so an
-    // older/not-yet-updated flow just means an empty list (dropdown still
-    // works via "Other, type your own").
+    // older/not-yet-updated flow just means an empty list, and with an empty
+    // list checkout is allowed without a destination (see
+    // destinationRequired()).
     liveDestinations = [...new Set((data.destinations || []).map(d => String(d.name || d || "").trim()).filter(Boolean))].sort();
     renderDestinationOptions();
     renderAll();
@@ -1917,24 +1916,29 @@ function renderProjectOptions(){
 // which may not be anywhere in the main tracker's Projects/Locations at all
 // (a client site, an external shoot location, etc). One shared value covers
 // the whole checkout batch, not per-device.
+// Destinations come only from the Destinations tab — there's no free-text
+// "Other"; a new place is added by adding a row to that tab. The list starts
+// on a disabled placeholder the moderator has to change.
 function renderDestinationOptions(){
   const sel = document.getElementById("co-destination");
   const current = sel.value;
-  sel.innerHTML = '<option value="">Not specified</option>' +
-    liveDestinations.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("") +
-    '<option value="__other__">Other — type a new destination…</option>';
-  if (current && (liveDestinations.includes(current) || current === "__other__")) sel.value = current;
+  sel.innerHTML = '<option value="" disabled selected>Select a destination…</option>' +
+    liveDestinations.map(d => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
+  if (current && liveDestinations.includes(current)) sel.value = current;
+  else sel.selectedIndex = 0;
 }
-document.getElementById("co-destination").addEventListener("change", (e) => {
-  document.getElementById("co-destination-other").style.display = e.target.value === "__other__" ? "" : "none";
-});
-// Resolves the dropdown + optional free-text into the single string that
-// actually gets logged — "Other" with nothing typed just falls back to
-// "not specified" rather than logging the literal placeholder value.
+document.getElementById("co-destination").addEventListener("change", updateSubmitEnabled);
 function getSelectedDestination(){
-  const sel = document.getElementById("co-destination").value;
-  if (sel === "__other__") return document.getElementById("co-destination-other").value.trim();
-  return sel;
+  return document.getElementById("co-destination").value || "";
+}
+// Required whenever there's a list to pick from. If the Destinations list
+// came back empty (older flow, failed read), checkout still works without
+// one rather than locking everybody out.
+function destinationRequired(){
+  return liveDestinations.length > 0;
+}
+function destinationMissing(){
+  return destinationRequired() && !getSelectedDestination();
 }
 
 function renderLocationOptions(){
@@ -2358,7 +2362,8 @@ function updateSubmitEnabled(){
   const errEl = document.getElementById("co-error");
   const n = coSelectedDevices.size;
   const missing = coMissingNotes();
-  btn.disabled = n === 0 || submitting || missing.length > 0;
+  const noDest = destinationMissing();
+  btn.disabled = n === 0 || submitting || missing.length > 0 || noDest;
   if (submitting){
     btn.textContent = "Checking out…";
   } else {
@@ -2367,14 +2372,18 @@ function updateSubmitEnabled(){
   if (errEl && !submitting){
     // Only speak up about missing notes; anything else in there is a real
     // error from a submit and shouldn't be wiped by a re-render.
+    // Same idea for the destination hint, which ranks below missing notes.
+    const showDest = !missing.length && noDest && n > 0;
     if (missing.length) errEl.textContent = needNoteMessage(missing, "checked out");
-    else if (errEl.dataset.owner === "notes") errEl.textContent = "";
-    errEl.dataset.owner = missing.length ? "notes" : "";
+    else if (showDest) errEl.textContent = "Pick a destination to check out.";
+    else if (errEl.dataset.owner === "notes" || errEl.dataset.owner === "destination") errEl.textContent = "";
+    errEl.dataset.owner = missing.length ? "notes" : (showDest ? "destination" : "");
   }
 }
 
 document.getElementById("co-submit").addEventListener("click", () => {
   if (coSelectedDevices.size === 0 || submitting) return;
+  if (destinationMissing()){ updateSubmitEnabled(); return; }
   if (!authInfo){ showAuthGate(); return; }
   requireChecklistThen(doCheckout);
 });
@@ -2384,6 +2393,7 @@ async function doCheckout(){
   const location = document.getElementById("co-location").value;
   const destination = getSelectedDestination();
   const errEl = document.getElementById("co-error");
+  if (destinationMissing()){ updateSubmitEnabled(); return; }
   errEl.textContent = "";
 
   submitting = true;
@@ -2488,9 +2498,7 @@ async function doCheckout(){
       { items: entries.map(([, rec]) => ({ main: rec.device.tag, sub: rec.device.model })), note });
     coSelectedDevices.clear();
     document.getElementById("co-device-search").value = "";
-    document.getElementById("co-destination").value = "";
-    document.getElementById("co-destination-other").value = "";
-    document.getElementById("co-destination-other").style.display = "none";
+    document.getElementById("co-destination").selectedIndex = 0;
   }
   setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
   renderAll();
