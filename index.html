@@ -183,6 +183,9 @@
   .ci-notes-toggle{width:26px;height:26px;padding:0;border-radius:50%;font-size:15px;line-height:1;display:flex;align-items:center;justify-content:center;color:var(--c-violet);flex-shrink:0;}
   .ci-notes-toggle.has-note{background:var(--c-violet-soft);border-color:var(--c-violet);}
   .ci-notes-input{margin-top:10px;width:100%;}
+  .ci-late-items{margin:2px 0 8px;display:flex;flex-direction:column;gap:4px;}
+  .ci-late-item{font-size:12.5px;line-height:1.4;}
+  .ci-late-item .pill.overdue{margin-left:0;margin-right:6px;}
 
   .activity-head{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
     font-size:11.5px;color:var(--sub);font-weight:600;padding:0 0 8px;}
@@ -490,6 +493,11 @@
 
     <div class="card" id="ci-details-card" style="display:none;">
       <div id="ci-selected-count" style="font-size:13px;color:var(--sub);font-weight:600;"></div>
+      <div id="ci-late-wrap" style="display:none;">
+        <label for="ci-late-reason"><span id="ci-late-label">Why was this returned late?</span> <span style="font-weight:400;">(required)</span></label>
+        <div id="ci-late-items" class="ci-late-items"></div>
+        <textarea id="ci-late-reason" rows="2" autocomplete="off" aria-required="true" placeholder="A short reason — left in the van, session ran long…"></textarea>
+      </div>
       <div style="margin-top:12px;">
         <button class="primary" id="ci-submit" style="width:100%;">Check in</button>
       </div>
@@ -2515,6 +2523,15 @@ document.getElementById("ci-search").addEventListener("input", renderCheckinList
 // one shared value applied to the whole batch.
 let ciSelected = new Map();
 
+// One reason for the whole check-in batch, asked only when something in the
+// selection stayed out past midnight Pacific. It is not its own column: the
+// log is append-only and matched by header name, and the workbook can't grow
+// a field from here. It is written into `notes` on the overnight rows at
+// submit time (see checkinNotesFor). Kept off the per-item note so a condition
+// comment and a late-return reason stay independently editable.
+let ciLateReason = "";
+const LATE_REASON_MIN = 3;
+
 // Attaches each open checkout's kit value (looked up from the live device
 // list by deviceId) so kitGroups() can bucket them the same way it does for
 // the Check Out tab's plain device objects.
@@ -2982,7 +2999,56 @@ function renderCheckinDetails(){
   }
   card.style.display = "";
   countEl.textContent = `${n} item${n === 1 ? "" : "s"} selected for check-in`;
+  renderLateReturnPrompt();
   updateCiSubmitEnabled();
+}
+
+// The same clock as the overnight reminder: still open, and checked out
+// before the most recent midnight Pacific. A same-day return is not in this
+// list, so the reason box stays hidden and Check in behaves as before.
+function selectedOvernightRecs(){
+  return [...ciSelected.values()].filter(rec => rec && rec.event && isOverdueCheckout(rec.event));
+}
+
+function lateReasonValue(){
+  const el = document.getElementById("ci-late-reason");
+  if (el) ciLateReason = el.value;
+  return String(ciLateReason || "").trim();
+}
+
+function lateReasonMissing(){
+  return selectedOvernightRecs().length > 0 && lateReasonValue().length < LATE_REASON_MIN;
+}
+
+// Notes stay per item. Overnight rows gain the shared reason; same-day rows
+// keep exactly the condition note they already had. A blank condition note
+// is just the late-return line, so the column never starts with a separator.
+function checkinNotesFor(rec){
+  const note = String(rec && rec.notes || "").trim();
+  if (!rec || !rec.event || !isOverdueCheckout(rec.event)) return note;
+  const reason = lateReasonValue();
+  if (!reason) return note;
+  const late = "Late return: " + reason;
+  return note ? (note + " | " + late) : late;
+}
+
+function renderLateReturnPrompt(){
+  const wrap = document.getElementById("ci-late-wrap");
+  const itemsEl = document.getElementById("ci-late-items");
+  const label = document.getElementById("ci-late-label");
+  const input = document.getElementById("ci-late-reason");
+  if (!wrap || !itemsEl) return;
+  const overnight = selectedOvernightRecs();
+  wrap.style.display = overnight.length ? "" : "none";
+  if (!overnight.length) return;
+  if (label) label.textContent = overnight.length === 1
+    ? "Why was this returned late?"
+    : "Why were these returned late?";
+  itemsEl.innerHTML = overnight.map(rec => {
+    const c = rec.event;
+    return `<div class="ci-late-item"><span class="pill overdue">Overdue</span> ${escapeHtml(c.tag)} — ${escapeHtml(c.model)}</div>`;
+  }).join("");
+  if (input && document.activeElement !== input && input.value !== ciLateReason) input.value = ciLateReason;
 }
 
 // Anything coming back Damaged files an issue report automatically, and that
@@ -3009,23 +3075,40 @@ function updateCiSubmitEnabled(){
   const errEl = document.getElementById("ci-error");
   const n = ciSelected.size;
   const missing = ciDamagedMissingNotes();
-  btn.disabled = n === 0 || submitting || missing.length > 0;
+  // Same gate shape as Check Out: missing condition notes outrank the
+  // late-return hint, and either one holds the button. A message this
+  // function didn't write — a real submit failure — is left alone.
+  const showLate = !missing.length && lateReasonMissing();
+  btn.disabled = n === 0 || submitting || missing.length > 0 || showLate;
   if (submitting){
     btn.textContent = "Checking in…";
   } else {
     btn.textContent = n > 1 ? `Check in ${n} items` : "Check in";
   }
   if (errEl && !submitting){
-    errEl.textContent = missing.length ? needNoteMessage(missing, "checked in") : "";
+    if (missing.length) errEl.textContent = needNoteMessage(missing, "checked in");
+    else if (showLate) errEl.textContent = "Add a short reason for the late return (at least 3 characters).";
+    else if (errEl.dataset.owner === "notes" || errEl.dataset.owner === "late") errEl.textContent = "";
+    errEl.dataset.owner = missing.length ? "notes" : (showLate ? "late" : "");
   }
 }
+
+document.getElementById("ci-late-reason").addEventListener("input", (e) => {
+  ciLateReason = e.target.value;
+  updateCiSubmitEnabled();
+});
 
 document.getElementById("ci-submit").addEventListener("click", async () => {
   if (ciSelected.size === 0 || submitting) return;
   if (!authInfo){ showAuthGate(); return; }
+  if (ciDamagedMissingNotes().length || lateReasonMissing()){
+    updateCiSubmitEnabled();
+    return;
+  }
   const entries = [...ciSelected.entries()]; // [checkoutId, {event, condition, notes}]
   const errEl = document.getElementById("ci-error");
   errEl.textContent = "";
+  errEl.dataset.owner = "";
 
   submitting = true;
   updateCiSubmitEnabled();
@@ -3052,7 +3135,7 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
       modName: authInfo.name || authInfo.login, partner: partnerName, sessionRole: sessionRole,
       deviceId: c.deviceId, tag: c.tag, model: c.model, serial: c.serial,
       project: c.project, location: c.location, destination: c.destination || "",
-      condition: rec.condition, notes: rec.notes.trim()
+      condition: rec.condition, notes: checkinNotesFor(rec)
     };
     // Sequential, same reasoning as the checkout batch — avoids hammering
     // Excel Online with simultaneous Run Script calls.
@@ -3090,6 +3173,9 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
   if (failed.length > 0){
     const failedTags = failed.map(f => f.tag);
     const anyUnknown = failed.some(f => f.unknown);
+    // A real failure, not a hint. Leaving owner blank means a later re-render
+    // won't wipe this while the late-return reason is already filled in.
+    errEl.dataset.owner = "";
     errEl.textContent = `Checked in ${entries.length - failed.length} of ${entries.length} — couldn't confirm: ${failedTags.join(", ")}.`;
     showResultModal(
       anyUnknown ? "Some check-ins weren't confirmed" : "Some check-ins failed",
@@ -3124,6 +3210,9 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
           sub: rec.condition === "Good" ? rec.event.model : `${rec.event.model} · ${rec.condition}`
         })), note });
     ciSelected.clear();
+    ciLateReason = "";
+    const lateInput = document.getElementById("ci-late-reason");
+    if (lateInput) lateInput.value = "";
   }
   setSyncStatus("Up to date · " + new Date().toLocaleTimeString());
   renderAll();
