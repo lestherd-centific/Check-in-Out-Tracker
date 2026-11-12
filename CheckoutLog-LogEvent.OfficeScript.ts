@@ -9,9 +9,12 @@
 // "Run script" action, mapped one-to-one from the Manual trigger's Request
 // body — NOT a single JSON payload string.
 //
-// Append-only by design: every checkout and every checkin is its own row,
-// linked by a shared checkoutId. Nothing is ever overwritten, so concurrent
-// writes from many moderators at once never collide.
+// Append-only by design: every checkout and every checkin is its own row.
+// One checkout submission writes the same checkoutId on every device in that
+// submission. A check-in copies the checkoutId of the loan it closes, so
+// devices returned together from different loans each keep their own.
+// Nothing is ever overwritten, so concurrent writes from many moderators
+// at once never collide.
 //
 // WRITES BY HEADER NAME, NOT BY POSITION. The previous version mapped values
 // to columns by their order in the sheet, which made every column change a
