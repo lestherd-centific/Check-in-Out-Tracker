@@ -32,7 +32,7 @@ project, location, condition, notes, destination, partner
 ```
 
 - `eventType` is `checkout` or `checkin`.
-- `checkoutId` links a checkout row to its later checkin row — the same value appears on both. This pairing is what "currently checked out" is derived from.
+- `checkoutId` is the loan id for one checkout submission. Every device row that submission writes carries the same value. A check-in row copies the `checkoutId` of the loan it closes, so returning gear from two trips in one visit keeps each row on its own loan, and returning one device does not close the others. Older rows hold a different value per device (`co-<timestamp><random><index>`, for example `co-1785500000000ex1` on the sample row). Those still pair with the check-in that repeats that exact value.
 - `project` / `location` is the equipment's **origin** — where it is normally held, per the main tracker.
 - `condition` is `Good`, `Fair` or `Damaged`.
 - `destination` is optional: wherever the equipment is actually being taken this trip, which may not exist anywhere in the main tracker's Projects/Locations (a client site, an external shoot). Blank string when unspecified.
@@ -199,7 +199,7 @@ Pagination is per-action and only appears when an action is selected. It exists 
 
 ## 6. How the features map onto the data
 
-- **"Currently checked out"** is derived entirely from CheckoutLog: a `checkout` row whose `checkoutId` has no matching `checkin` row. The main tracker's own `status` field means something different — where equipment is deployed, not who is holding it this afternoon — and the two are deliberately independent.
+- **"Currently checked out"** is derived entirely from CheckoutLog. A checkout row stays open until a check-in closes that device on that loan. A loan with one checkout row (the historical shape, one `checkoutId` per device) is closed by any check-in carrying that id. A loan with several devices sharing a `checkoutId` is closed one device at a time: the check-in has to match that device, and the others stay out. The main tracker's own `status` field means something different — where equipment is deployed, not who is holding it this afternoon — and the two are deliberately independent.
 - **A device is withheld from check-out** when DeviceIssues holds a row for its `Device Ref` whose `Status` is not Resolved or Replaced. It is shown greyed with the reason rather than hidden, so a moderator holding the physical item can see why.
 - **Marking something Damaged at check-in** requires a note and files an issue report automatically, so the withholding rule has something to act on without anyone remembering a second step.
 - **If the issue log is unreachable**, nothing is withheld and check-out carries on. A flow outage must not stop a shift.

@@ -217,7 +217,7 @@
   footer.note{font-size:11.5px;color:var(--footer-muted);margin-top:24px;line-height:1.5;}
 
   #resultModalBackdrop{z-index:70;}
-  #resultModalBackdrop .modal{width:380px;}
+  #resultModalBackdrop .modal{width:420px;max-width:92vw;max-height:88vh;overflow:auto;}
   #resultModalMessage{font-size:13.5px;line-height:1.5;margin-top:6px;}
   .result-lead{font-size:13.5px;line-height:1.5;}
   /* Capped and scrollable: a twelve-device batch shouldn't push the Close
@@ -226,7 +226,26 @@
   .result-list li{padding:7px 10px;border-radius:7px;background:var(--note-bg);margin-bottom:5px;font-size:13px;line-height:1.45;}
   .result-list li b{font-weight:700;}
   .result-list li span{color:var(--sub);}
+  .result-serial{color:var(--sub);font-size:12px;margin-top:2px;}
   .result-note{font-size:12.5px;line-height:1.5;color:var(--sub);margin-top:11px;}
+  /* Partial check-in. The red is the same "still out" tone as the overnight
+     reminder, so a return that left gear behind doesn't look like a clean
+     "all done". Tag, model and serial each get their own weight — a serial
+     buried in the model line is how a partial return gets walked past. */
+  .result-still{margin-top:14px;padding:12px;border-radius:8px;background:var(--cond-damaged-bg);}
+  .result-still-title{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--cond-damaged);}
+  .result-still-lead{font-size:13px;line-height:1.45;margin-top:4px;}
+  .result-still-list{margin-top:8px;}
+  .result-still-list li{background:var(--panel);}
+
+  /* Count confirm, shown after Check out is tapped and before anything is
+     written. Same card as the other dialogs; sits under the result modal. */
+  #coConfirmBackdrop{z-index:68;}
+  #coConfirmBackdrop .modal{width:420px;max-width:92vw;max-height:88vh;overflow:auto;}
+  .co-confirm-lead{font-size:13px;line-height:1.45;color:var(--sub);margin-top:4px;}
+  .co-confirm-dup{font-size:13px;line-height:1.45;font-weight:600;color:var(--cond-damaged);background:var(--cond-damaged-bg);border-radius:8px;padding:9px 11px;margin-top:12px;}
+  .result-list li.dup{background:var(--cond-damaged-bg);}
+  .dup-flag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:999px;background:var(--cond-damaged);color:#fff;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;vertical-align:1px;}
 
   /* --- Escalation steps -------------------------------------------------- */
   /* Sits above the result modal (70), because on the check-in path it opens
@@ -611,6 +630,21 @@
   </div>
 </div>
 
+<!-- Checkout count confirm. Opens after Check out is tapped, before any row
+     is written, so a missed or doubled scan can still be taken back. -->
+<div class="modal-backdrop" id="coConfirmBackdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="coConfirmTitle">
+    <h3 id="coConfirmTitle">You're taking 0 items</h3>
+    <div class="co-confirm-lead" id="coConfirmLead">Confirm the count and the list before this checkout is recorded.</div>
+    <div class="co-confirm-dup" id="coConfirmDup" style="display:none;"></div>
+    <ul class="result-list" id="coConfirmList"></ul>
+    <div style="display:flex;gap:8px;margin-top:16px;">
+      <button id="coConfirmCancel" style="flex:1;">Cancel</button>
+      <button class="primary" id="coConfirmOk" style="flex:1;">Confirm check-out</button>
+    </div>
+  </div>
+</div>
+
 <!-- Follows a filed issue report. Filing is already done by the time this
      opens; the second step is the one the moderator still has to do. -->
 <div class="modal-backdrop" id="escalationBackdrop">
@@ -891,8 +925,12 @@ const CACHE_MAX_ROWS = 3000;
 // tab — those are only history, so they're the safe thing to drop.
 function rowsToPersist(){
   if (checkoutLog.length <= CACHE_MAX_ROWS) return checkoutLog;
-  const closedIds = new Set(checkoutLog.filter(e => e.eventType === "checkin").map(e => e.checkoutId));
-  const mustKeep = e => e._local || !closedIds.has(e.checkoutId);
+  // Keep every checkout row that is still open, however old. A loan can now
+  // share one checkoutId across several devices, so "this checkoutId has a
+  // check-in somewhere" is no longer the same as "this device is back" — that
+  // test used to drop the siblings that were still out once the cache filled.
+  const openIds = new Set(openCheckouts().map(c => c.id).filter(Boolean));
+  const mustKeep = e => e._local || (e.eventType === "checkout" && openIds.has(e.id));
   const kept = checkoutLog.filter(mustKeep);
   const droppable = checkoutLog.filter(e => !mustKeep(e)); // oldest-first, so newest are at the end
   const budget = Math.max(0, CACHE_MAX_ROWS - kept.length);
@@ -930,11 +968,22 @@ function showResultModal(title, message, isError, details){
   const msgEl = document.getElementById("resultModalMessage");
   const items = (details && details.items) || [];
   const note = details && details.note;
+  const stillOut = (details && details.stillOut) || [];
+  const stillLead = (details && details.stillOutLead) || "These are still out:";
 
   msgEl.innerHTML =
     `<div class="result-lead" style="color:${isError ? "var(--cond-damaged)" : "var(--ink)"}">${escapeHtml(message)}</div>` +
     (items.length
       ? `<ul class="result-list">${items.map(it => `<li><b>${escapeHtml(it.main)}</b>${it.sub ? ` <span>${escapeHtml(it.sub)}</span>` : ""}</li>`).join("")}</ul>`
+      : "") +
+    (stillOut.length
+      ? `<div class="result-still">
+          <div class="result-still-title">Still out · ${stillOut.length}</div>
+          <div class="result-still-lead">${escapeHtml(stillLead)}</div>
+          <ul class="result-list result-still-list">${stillOut.map(it =>
+            `<li><b>${escapeHtml(it.tag)}</b> <span>${escapeHtml(it.model)}</span><div class="result-serial">Serial ${escapeHtml(it.serial || "—")}</div></li>`
+          ).join("")}</ul>
+        </div>`
       : "") +
     (note ? `<div class="result-note">${escapeHtml(note)}</div>` : "");
 
@@ -1592,20 +1641,91 @@ async function loadAll(){
 // ---------------------------------------------------------------------------
 // Derived data
 // ---------------------------------------------------------------------------
-// A device counts as "out" from this system's point of view if it has a
-// checkout event with no later checkin event sharing the same checkoutId —
-// regardless of what the main tracker's own status field says, since this
-// site never touches that field.
-function openCheckouts(){
-  const byCheckoutId = {};
-  checkoutLog.forEach(e => {
-    if (!byCheckoutId[e.checkoutId]) byCheckoutId[e.checkoutId] = {};
-    byCheckoutId[e.checkoutId][e.eventType] = e;
+function normIdentity(v){
+  return String(v ?? "").trim().toLowerCase();
+}
+// Placeholders that show up when a serial or tag was never recorded. Two of
+// those are not the same physical item.
+function isBlankIdentity(v){
+  const s = normIdentity(v);
+  return !s || s === "—" || s === "-" || s === "–" || s === "n/a" || s === "na" || s === "none" || s === "unknown" || s === "tbd";
+}
+
+// Stable key for one open checkout ROW. checkoutId is the loan, and a loan
+// can now cover several devices, so it is not unique enough to select or
+// focus a single row.
+function openItemKey(c){
+  if (!c) return "";
+  const id = String(c.id || "").trim();
+  if (id) return id;
+  return ["loan", c.checkoutId, c.deviceId, c.tag, c.serial].map(v => String(v || "")).join("\u0001");
+}
+
+// Remote rows carry _seq (Excel order, oldest first). Local rows that have
+// not round-tripped yet carry _addedAt and sort after everything the server
+// has already returned.
+function logChronological(){
+  return [...checkoutLog].sort((a, b) => {
+    const al = a._local ? 1 : 0, bl = b._local ? 1 : 0;
+    if (al !== bl) return al - bl;
+    if (al) return (a._addedAt || 0) - (b._addedAt || 0);
+    return (a._seq || 0) - (b._seq || 0);
   });
-  return Object.values(byCheckoutId)
-    .filter(pair => pair.checkout && !pair.checkin)
-    .map(pair => pair.checkout)
-    .sort((a, b) => (b._addedAt || 0) - (a._addedAt || 0) || b.ts.localeCompare(a.ts));
+}
+
+// A check-in closes one checkout row of the same loan. deviceId is what the
+// check-in copies off the checkout row. Tag, then serial, only cover a row
+// whose deviceId was never stored.
+function sameLoanDevice(checkout, checkin){
+  const a = normIdentity(checkout.deviceId);
+  const b = normIdentity(checkin.deviceId);
+  if (a && b) return a === b;
+  const tagA = normIdentity(checkout.tag), tagB = normIdentity(checkin.tag);
+  if (!isBlankIdentity(tagA) && tagA === tagB) return true;
+  const serA = normIdentity(checkout.serial), serB = normIdentity(checkin.serial);
+  if (!isBlankIdentity(serA) && serA === serB) return true;
+  return false;
+}
+
+// A device counts as "out" when its checkout row has not been closed by a
+// check-in of that same device on that same loan — regardless of what the
+// main tracker's own status field says, since this site never touches it.
+//
+// checkoutId is one value per checkout submission, shared by every device in
+// it. Matching on the id alone would close the whole loan the moment the
+// first device came back. A loan that holds a single checkout row (every row
+// written before this, each with its own checkoutId) still closes on any
+// check-in that repeats that id, which is how those rows were always paired.
+function openCheckouts(){
+  const byLoan = new Map();
+  const loose = [];
+  logChronological().forEach(e => {
+    if (e.eventType !== "checkout" && e.eventType !== "checkin") return;
+    const loan = String(e.checkoutId || "").trim();
+    if (!loan){
+      if (e.eventType === "checkout") loose.push(e);
+      return;
+    }
+    if (!byLoan.has(loan)) byLoan.set(loan, { checkouts: [], checkins: [] });
+    byLoan.get(loan)[e.eventType === "checkout" ? "checkouts" : "checkins"].push(e);
+  });
+  const open = loose.slice();
+  byLoan.forEach(group => {
+    const checkouts = group.checkouts;
+    const checkins = group.checkins;
+    if (checkouts.length === 0) return;
+    if (checkouts.length === 1){
+      if (checkins.length === 0) open.push(checkouts[0]);
+      return;
+    }
+    const unmatched = checkouts.slice();
+    checkins.forEach(ci => {
+      const idx = unmatched.findIndex(co => sameLoanDevice(co, ci));
+      if (idx >= 0) unmatched.splice(idx, 1);
+    });
+    unmatched.forEach(co => open.push(co));
+  });
+  return open.sort((a, b) => (b._addedAt || 0) - (a._addedAt || 0) || String(b.ts || "").localeCompare(String(a.ts || "")));
 }
 function openDeviceIds(){ return new Set(openCheckouts().map(c => c.deviceId).filter(Boolean)); }
 
@@ -2392,8 +2512,86 @@ function updateSubmitEnabled(){
 document.getElementById("co-submit").addEventListener("click", () => {
   if (coSelectedDevices.size === 0 || submitting) return;
   if (destinationMissing()){ updateSubmitEnabled(); return; }
+  if (coMissingNotes().length){ updateSubmitEnabled(); return; }
   if (!authInfo){ showAuthGate(); return; }
-  requireChecklistThen(doCheckout);
+  requireChecklistThen(openCheckoutConfirm);
+});
+
+// device id -> reasons it collides with another row in this basket.
+// The basket is keyed by device id, so the same record can't be added twice
+// by tapping. A duplicate scan still shows up when two records are the same
+// physical item: same asset tag, or same serial.
+function duplicateScanReasons(devices){
+  const reasons = new Map();
+  const add = (id, reason) => {
+    if (!reasons.has(id)) reasons.set(id, new Set());
+    reasons.get(id).add(reason);
+  };
+  const groups = [
+    ["Same asset tag", d => isBlankIdentity(d.tag) ? "" : normIdentity(d.tag)],
+    ["Same serial", d => isBlankIdentity(d.serial) ? "" : normIdentity(d.serial)],
+    ["Same device", d => normIdentity(d.id)]
+  ];
+  groups.forEach(([reason, value]) => {
+    const by = new Map();
+    devices.forEach(d => {
+      const key = value(d);
+      if (!key) return;
+      if (!by.has(key)) by.set(key, []);
+      by.get(key).push(d.id);
+    });
+    by.forEach(ids => {
+      if (ids.length < 2) return;
+      ids.forEach(id => add(id, reason));
+    });
+  });
+  return reasons;
+}
+
+function closeCheckoutConfirm(){
+  document.getElementById("coConfirmBackdrop").classList.remove("open");
+}
+
+function openCheckoutConfirm(){
+  const entries = [...coSelectedDevices.values()];
+  const n = entries.length;
+  if (n === 0 || submitting) return;
+  const reasons = duplicateScanReasons(entries.map(r => r.device));
+  document.getElementById("coConfirmTitle").textContent =
+    n === 1 ? "You're taking 1 item" : `You're taking ${n} items`;
+  const dupEl = document.getElementById("coConfirmDup");
+  if (reasons.size){
+    dupEl.style.display = "";
+    dupEl.textContent = "Duplicate scan — the same item is in this list more than once. Remove the extra from your selection, then check out again.";
+  } else {
+    dupEl.style.display = "none";
+    dupEl.textContent = "";
+  }
+  document.getElementById("coConfirmList").innerHTML = entries.map(rec => {
+    const d = rec.device;
+    const why = reasons.get(d.id);
+    return `<li class="${why ? "dup" : ""}"><b>${escapeHtml(d.tag)}</b> <span>${escapeHtml(d.model)}</span>${
+      why ? ` <span class="dup-flag">Duplicate</span>` : ""}<div class="result-serial">Serial ${escapeHtml(d.serial || "—")}</div></li>`;
+  }).join("");
+  const ok = document.getElementById("coConfirmOk");
+  ok.disabled = reasons.size > 0;
+  document.getElementById("coConfirmBackdrop").classList.add("open");
+  (reasons.size ? document.getElementById("coConfirmCancel") : ok).focus();
+}
+
+document.getElementById("coConfirmCancel").addEventListener("click", closeCheckoutConfirm);
+document.getElementById("coConfirmOk").addEventListener("click", () => {
+  const ok = document.getElementById("coConfirmOk");
+  if (ok.disabled || submitting) return;
+  ok.disabled = true;
+  closeCheckoutConfirm();
+  doCheckout();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const backdrop = document.getElementById("coConfirmBackdrop");
+  if (!backdrop || !backdrop.classList.contains("open")) return;
+  closeCheckoutConfirm();
 });
 
 async function doCheckout(){
@@ -2453,6 +2651,10 @@ async function doCheckout(){
   const entries = [...coSelectedDevices.entries()]; // [deviceId, {device, condition, notes}]
   showProgressModal("Checking out…");
   const failed = [];
+  // One loan id for every device in this submission. Checked in later by
+  // copying this value onto each return, per device — not by inventing a
+  // new id for the return, and not by giving each device its own.
+  const checkoutId = "co-" + Date.now().toString() + Math.random().toString(36).slice(2);
   for (let i = 0; i < entries.length; i++){
     const [id, rec] = entries[i];
     const d = rec.device;
@@ -2460,7 +2662,7 @@ async function doCheckout(){
     updateProgressModal(`${d.tag} — ${d.model} (${i + 1} of ${entries.length})`, (i / entries.length) * 100);
     const event = {
       id: "evt-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
-      checkoutId: "co-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
+      checkoutId,
       eventType: "checkout", ts: new Date().toLocaleString(),
       modName: authInfo.name || authInfo.login, partner: partnerName, sessionRole: sessionRole,
       deviceId: d.id, tag: d.tag, model: d.model, serial: d.serial,
@@ -2518,9 +2720,12 @@ async function doCheckout(){
 // ---------------------------------------------------------------------------
 document.getElementById("ci-search").addEventListener("input", renderCheckinList);
 
-// checkoutId -> { event, condition, notes, notesOpen }. Each selected item
-// carries its OWN condition/notes now (set inline on its row) rather than
-// one shared value applied to the whole batch.
+// Open-item key (the checkout row's id) -> { event, condition, notes, notesOpen }.
+// Keyed by the row, not by checkoutId. One submission shares a checkoutId
+// across every device in it, and each of those devices is selected on its
+// own. The check-in still writes event.checkoutId — the loan that row closes.
+// Each selected item carries its OWN condition/notes rather than one shared
+// value applied to the whole batch.
 let ciSelected = new Map();
 
 // One reason for the whole check-in batch, asked only when something in the
@@ -2554,7 +2759,7 @@ function renderCiKitChips(){
   const groups = kitGroups(withKit);
   if (groups.length === 0){ wrap.innerHTML = ""; return; }
   wrap.innerHTML = groups.map(g => {
-    const selectedCount = g.devices.filter(c => ciSelected.has(c.checkoutId)).length;
+    const selectedCount = g.devices.filter(c => ciSelected.has(openItemKey(c))).length;
     const allSelected = selectedCount === g.devices.length;
     return `<div class="kit-chip ${allSelected ? "all-selected" : ""}" data-kit="${escapeHtml(g.kit)}">🧩 ${escapeHtml(g.kit)} · ${selectedCount}/${g.devices.length} out${kitTooltipHtml(g.devices)}</div>`;
   }).join("");
@@ -2564,12 +2769,13 @@ function renderCiKitChips(){
       const kit = chip.dataset.kit;
       const group = groups.find(g => g.kit === kit);
       if (!group) return;
-      const allSelected = group.devices.every(c => ciSelected.has(c.checkoutId));
+      const allSelected = group.devices.every(c => ciSelected.has(openItemKey(c)));
       if (allSelected){
-        group.devices.forEach(c => ciSelected.delete(c.checkoutId));
+        group.devices.forEach(c => ciSelected.delete(openItemKey(c)));
       } else {
         group.devices.forEach(c => {
-          if (!ciSelected.has(c.checkoutId)) ciSelected.set(c.checkoutId, newReturn(c));
+          const key = openItemKey(c);
+          if (!ciSelected.has(key)) ciSelected.set(key, newReturn(c));
         });
       }
       renderCheckinList();
@@ -2800,7 +3006,7 @@ function renderOverdueModal(items){
 }
 
 function overdueBlockedByOtherModal(){
-  return ["authGateBackdrop", "roleBackdrop", "progressModalBackdrop", "resultModalBackdrop", "escalationBackdrop", "onbBackdrop", "issueBackdrop"]
+  return ["authGateBackdrop", "roleBackdrop", "progressModalBackdrop", "resultModalBackdrop", "coConfirmBackdrop", "escalationBackdrop", "onbBackdrop", "issueBackdrop"]
     .some(id => {
       const el = document.getElementById(id);
       return el && el.classList.contains("open");
@@ -2838,10 +3044,10 @@ function takeMeToCheckIn(){
   const search = document.getElementById("ci-search");
   if (search && search.value) search.value = "";
   renderCheckinList();
-  const ids = myOverdueCheckouts().map(x => x.checkout.checkoutId);
+  const keys = myOverdueCheckouts().map(x => openItemKey(x.checkout));
   let first = null;
-  ids.forEach(id => {
-    const el = document.querySelector('.open-item[data-checkout-id="' + CSS.escape(id) + '"]');
+  keys.forEach(key => {
+    const el = document.querySelector('.open-item[data-open-key="' + CSS.escape(key) + '"]');
     if (!el) return;
     el.classList.add("overdue-focus");
     if (!first) first = el;
@@ -2870,8 +3076,8 @@ function renderCheckinList(){
     !q || [c.tag, c.model, c.serial, c.project, c.location, c.modName, c.partner].join(" ").toLowerCase().includes(q)
   );
   // Drop selections for anything that's no longer open (e.g. checked in from another tab/session).
-  const openIds = new Set(openCheckouts().map(c => c.checkoutId));
-  [...ciSelected.keys()].forEach(id => { if (!openIds.has(id)) ciSelected.delete(id); });
+  const openKeys = new Set(openCheckouts().map(openItemKey));
+  [...ciSelected.keys()].forEach(id => { if (!openKeys.has(id)) ciSelected.delete(id); });
   renderCiKitChips();
 
   const listEl = document.getElementById("ci-list");
@@ -2879,7 +3085,7 @@ function renderCheckinList(){
     listEl.innerHTML = '<div class="empty-hint">Nothing is currently checked out.</div>';
   } else {
     const renderRow = c => {
-      const rec = ciSelected.get(c.checkoutId);
+      const rec = ciSelected.get(openItemKey(c));
       const selected = !!rec;
       const condition = rec ? rec.condition : "Good";
       const rightControls = selected ? `
@@ -2898,7 +3104,7 @@ function renderCheckinList(){
           ? `<textarea class="ci-notes-input" placeholder="Note for this item…">${escapeHtml(rec.notes)}</textarea>`
           : "");
       return `
-      <div class="open-item ${selected ? "selected" : ""} ${isMyCheckout(c) ? "mine" : ""}" data-checkout-id="${escapeHtml(c.checkoutId)}">
+      <div class="open-item ${selected ? "selected" : ""} ${isMyCheckout(c) ? "mine" : ""}" data-open-key="${escapeHtml(openItemKey(c))}">
         <div class="top">
           <div>
             <div class="name">${escapeHtml(c.tag)} — ${escapeHtml(c.model)}${isOverdueCheckout(c) ? ' <span class="pill overdue">Overdue</span>' : ""}</div>
@@ -2930,21 +3136,21 @@ function renderCheckinList(){
           : "You can return these too — just check the condition before you do.");
 
     listEl.querySelectorAll(".open-item").forEach(el => {
-      const checkoutId = el.dataset.checkoutId;
-      const c = open.find(o => o.checkoutId === checkoutId);
+      const itemKey = el.dataset.openKey;
+      const c = open.find(o => openItemKey(o) === itemKey);
       if (!c) return;
 
       el.addEventListener("click", () => {
         if (!authInfo){ showAuthGate(); return; }
-        if (ciSelected.has(checkoutId)) ciSelected.delete(checkoutId);
-        else ciSelected.set(checkoutId, newReturn(c));
+        if (ciSelected.has(itemKey)) ciSelected.delete(itemKey);
+        else ciSelected.set(itemKey, newReturn(c));
         renderCheckinList();
       });
 
       el.querySelectorAll(".mini-cond-choice").forEach(btn => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
-          const rec = ciSelected.get(checkoutId);
+          const rec = ciSelected.get(itemKey);
           if (!rec) return;
           rec.condition = btn.dataset.cond;
           renderCheckinList();
@@ -2955,7 +3161,7 @@ function renderCheckinList(){
       if (notesToggle){
         notesToggle.addEventListener("click", (e) => {
           e.stopPropagation();
-          const rec = ciSelected.get(checkoutId);
+          const rec = ciSelected.get(itemKey);
           if (!rec) return;
           rec.notesOpen = !rec.notesOpen;
           renderCheckinList();
@@ -2968,7 +3174,7 @@ function renderCheckinList(){
         // Just store the value — no re-render on every keystroke, or the
         // textarea would lose focus/cursor position while typing.
         notesInput.addEventListener("input", (e) => {
-          const rec = ciSelected.get(checkoutId);
+          const rec = ciSelected.get(itemKey);
           if (!rec) return;
           const wasEmpty = !String(rec.notes || "").trim();
           rec.notes = e.target.value;
@@ -2979,7 +3185,7 @@ function renderCheckinList(){
           if (conditionNeedsNote(rec.condition) && wasEmpty !== !String(rec.notes).trim()){
             renderCheckinList();
             const again = document.querySelector(
-              `.open-item[data-checkout-id="${CSS.escape(checkoutId)}"] .ci-notes-input`);
+              `.open-item[data-open-key="${CSS.escape(itemKey)}"] .ci-notes-input`);
             if (again){ again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
           }
         });
@@ -3105,7 +3311,7 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
     updateCiSubmitEnabled();
     return;
   }
-  const entries = [...ciSelected.entries()]; // [checkoutId, {event, condition, notes}]
+  const entries = [...ciSelected.entries()]; // [openItemKey, {event, condition, notes}]
   const errEl = document.getElementById("ci-error");
   errEl.textContent = "";
   errEl.dataset.owner = "";
@@ -3123,13 +3329,16 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
   // batch in one e-mail rather than one per device.
   const filedIssues = [];
   for (let i = 0; i < entries.length; i++){
-    const [checkoutId, rec] = entries[i];
+    const [itemKey, rec] = entries[i];
     const c = rec.event;
     if (entries.length > 1) setSyncStatus(`Checking in ${i + 1} of ${entries.length}…`);
     updateProgressModal(`${c.tag} — ${c.model} (${i + 1} of ${entries.length})`, (i / entries.length) * 100);
     const submitEvt = {
       id: "evt-" + Date.now().toString() + Math.random().toString(36).slice(2) + i,
-      checkoutId, eventType: "checkin", ts: new Date().toLocaleString(),
+      // The loan this return closes. Items from several loans returned in
+      // one visit each keep that loan's checkoutId — this is not a new id
+      // for the return batch.
+      checkoutId: c.checkoutId, eventType: "checkin", ts: new Date().toLocaleString(),
       // Recorded as of the check-in, which may be a different pairing from the
       // one the equipment went out with — that is the accurate thing to store.
       modName: authInfo.name || authInfo.login, partner: partnerName, sessionRole: sessionRole,
@@ -3140,7 +3349,7 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
     // Sequential, same reasoning as the checkout batch — avoids hammering
     // Excel Online with simultaneous Run Script calls.
     const result = await postEvent(submitEvt);
-    if (!result.ok) failed.push({ checkoutId, rec, tag: c.tag, unknown: !!result.unknown });
+    if (!result.ok) failed.push({ itemKey, rec, tag: c.tag, unknown: !!result.unknown });
     // Damaged gear files its own report, so the escalation path starts without
     // anyone having to remember a second step. Only after the check-in itself
     // succeeded — a report for an event that never landed would be misleading.
@@ -3186,7 +3395,7 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
           ? "The server didn't answer in time — these may still have gone through. Refresh the page and check before tapping Check in again, or you'll record them twice."
           : "They're still selected — tap Check in again to retry just these." });
     // Keep only the failed ones selected (with their condition/notes intact) so retrying doesn't re-submit ones that already succeeded.
-    ciSelected = new Map(failed.map(f => [f.checkoutId, f.rec]));
+    ciSelected = new Map(failed.map(f => [f.itemKey, f.rec]));
   } else {
     const damaged = entries.filter(([, rec]) => rec.condition === "Damaged").length;
     let note = "";
@@ -3201,6 +3410,10 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
         ? `Couldn't confirm the issue report for ${tags} — check the Device Issues tab first, and only file it again if it isn't there.`
         : `Couldn't file an issue report for ${tags} — please report it from the Device Issues tab.`;
     }
+    const stillOut = openCheckouts().filter(isMyCheckout);
+    const stillOutLead = partnerName
+      ? `You checked in only part of what is out with you or ${partnerName}. These are still out:`
+      : "You checked in only part of what you have out. These are still out:";
     showResultModal(
       "Checked in",
       entries.length > 1 ? `${entries.length} items returned:` : "Item returned:",
@@ -3208,7 +3421,14 @@ document.getElementById("ci-submit").addEventListener("click", async () => {
       { items: entries.map(([, rec]) => ({
           main: rec.event.tag,
           sub: rec.condition === "Good" ? rec.event.model : `${rec.event.model} · ${rec.condition}`
-        })), note });
+        })),
+        note,
+        stillOut: stillOut.map(c => ({
+          tag: c.tag || "—",
+          model: c.model || "—",
+          serial: c.serial || "—"
+        })),
+        stillOutLead });
     ciSelected.clear();
     ciLateReason = "";
     const lateInput = document.getElementById("ci-late-reason");
